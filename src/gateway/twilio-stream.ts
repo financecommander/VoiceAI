@@ -30,6 +30,9 @@ import type { CalcModel, AuthTier } from '../types.js';
 import type { VoicePipelineController } from './pipeline-controller.js';
 import type { DeepgramSTTClient } from './deepgram-client.js';
 import type { CartesiaTTSClient } from './cartesia-client.js';
+import type { LLMService } from '../llm/provider.js';
+import type { ToolExecutor } from '../llm/tool-executor.js';
+import { buildToolSchemas } from '../llm/provider.js';
 
 // ============================================================================
 // Twilio Message Types
@@ -235,6 +238,8 @@ export class TwilioMediaStreamHandler {
   private pipelineController: VoicePipelineController;
   private deepgram: DeepgramSTTClient;
   private cartesia: CartesiaTTSClient;
+  private llm: LLMService;
+  private toolExecutor: ToolExecutor;
   private logger: Logger;
 
   private streamSid: string | null = null;
@@ -252,12 +257,16 @@ export class TwilioMediaStreamHandler {
     pipelineController: VoicePipelineController;
     deepgram: DeepgramSTTClient;
     cartesia: CartesiaTTSClient;
+    llm: LLMService;
+    toolExecutor: ToolExecutor;
     logger: Logger;
   }) {
     this.ws = params.ws;
     this.pipelineController = params.pipelineController;
     this.deepgram = params.deepgram;
     this.cartesia = params.cartesia;
+    this.llm = params.llm;
+    this.toolExecutor = params.toolExecutor;
     this.logger = params.logger.child({ component: 'TwilioMediaStream' });
 
     this.setupWebSocketHandlers();
@@ -605,28 +614,54 @@ export class TwilioMediaStreamHandler {
   // ==========================================================================
 
   /**
-   * Generate a response from the routed LLM.
-   * In production, this dispatches to GPT-4o or Claude based on the
-   * routing decision, with the system prompt, tools, and conversation history.
+   * Generate a response from the routed LLM (GPT-4o or Claude).
+   * Executes tool calls via the ToolExecutor service dispatch.
    */
   private async generateLLMResponse(result: any): Promise<string | null> {
-    // This is where the actual LLM call happens.
-    // The orchestrator has already decided which provider + tools to use.
-    // Implementation would:
-    //   1. Build messages array from conversation history
-    //   2. Include system prompt for the active model
-    //   3. Include tool definitions
-    //   4. Call the appropriate API (OpenAI / Anthropic)
-    //   5. Execute any tool calls
-    //   6. Return the final text response
+    if (!this.sessionConfig) return null;
+
+    const conversationId = this.callSid ?? 'unknown';
+    const model = this.sessionConfig.model;
+    const provider = result.provider ?? 'gpt-4o';
+    const tools = result.tools ?? [];
+    const latencyBudget = result.latencyBudget ?? 800;
+
+    const toolSchemas = buildToolSchemas(tools);
+
+    const executor = this.toolExecutor;
+    const authTier = result.authTier ?? 0;
+    const customerId = result.customerId ?? null;
+
+    const response = await this.llm.generateResponse({
+      conversationId,
+      provider,
+      model,
+      intent: result.intent ?? null,
+      authTier,
+      userUtterance: result.userUtterance ?? '',
+      systemInstruction: result.responseInstruction ?? '',
+      tools: toolSchemas,
+      toolExecutor: async (name: string, args: Record<string, unknown>) => {
+        return executor.execute(name, args, {
+          conversationId,
+          model,
+          authTier,
+          customerId,
+        });
+      },
+      latencyBudgetMs: latencyBudget,
+    });
 
     this.logger.info({
-      provider: result.provider,
-      instruction: result.responseInstruction?.substring(0, 80),
-    }, 'Would generate LLM response');
+      provider: response.provider,
+      latencyMs: response.latencyMs,
+      tokensUsed: response.tokensUsed,
+      toolCalls: response.toolCalls.length,
+      wasFallback: response.wasFallback,
+      responseLength: response.text.length,
+    }, 'LLM response generated');
 
-    // Placeholder — return null to indicate no response yet
-    return null;
+    return response.text || null;
   }
 
   // ==========================================================================

@@ -25,6 +25,8 @@ import { CartesiaTTSClient } from './cartesia-client.js';
 import { GHLService } from '../services/crm/ghl-service.js';
 import { HubSpotService } from '../services/crm/hubspot-service.js';
 import { UnifiedCRMAdapter, DEFAULT_CRM_ROUTING } from '../services/crm/unified-adapter.js';
+import { LLMService } from '../llm/provider.js';
+import { ToolExecutor } from '../llm/tool-executor.js';
 
 dotenv.config();
 
@@ -112,6 +114,16 @@ const wss = new WebSocketServer({ server });
 // Track active calls
 const activeCalls = new Map<string, TwilioMediaStreamHandler>();
 
+// Shared LLM service (stateless per request, history keyed by conversationId)
+const llmService = new LLMService({
+  openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+  gpt4oModel: 'gpt-4o',
+  claudeModel: 'claude-sonnet-4-5-20250929',
+  maxTokens: 300,
+  temperature: { 'gpt-4o': 0.3, claude: 0.4 },
+}, logger);
+
 wss.on('connection', (ws: WebSocket, req) => {
   const pathname = new URL(req.url ?? '/', `http://${req.headers.host}`).pathname;
   const callSidMatch = pathname.match(/\/ws\/call\/(.+)/);
@@ -175,11 +187,19 @@ wss.on('connection', (ws: WebSocket, req) => {
     speed: 1.0,
   }, logger);
 
+  // Tool executor with mock services (replace with real implementations)
+  const toolExecutor = new ToolExecutor(
+    createMockServiceRegistry(consentService, auditService),
+    logger,
+  );
+
   const handler = new TwilioMediaStreamHandler({
     ws,
     pipelineController,
     deepgram,
     cartesia,
+    llm: llmService,
+    toolExecutor,
     logger,
   });
 
@@ -217,6 +237,168 @@ function createMockAuditService() {
       return 'mock-event-id';
     },
     getConversationAudit: async () => [],
+  };
+}
+
+function createMockServiceRegistry(consentService: any, auditService: any) {
+  const notImplemented = (name: string) => async (..._args: any[]) => {
+    logger.warn({ service: name }, 'Mock service called — not implemented');
+    return { mock: true, service: name };
+  };
+
+  return {
+    nymbus: {
+      getAccountBalances: async (customerId: string) => ([
+        { accountId: 'CHK-001', type: 'checking', balance: 4523.87, currency: 'USD', available: 4423.87 },
+        { accountId: 'SAV-001', type: 'savings', balance: 12050.00, currency: 'USD', available: 12050.00 },
+      ]),
+      getRecentTransactions: async () => ([
+        { date: '2026-02-27', description: 'Direct Deposit - Employer', amount: 3200.00, type: 'credit' },
+        { date: '2026-02-26', description: 'Amazon.com', amount: -47.99, type: 'debit' },
+        { date: '2026-02-25', description: 'Starbucks #1234', amount: -6.75, type: 'debit' },
+      ]),
+      getCardStatus: async () => ({ cardLast4: '4582', status: 'active', type: 'debit' }),
+      getPayees: async () => ([
+        { payeeId: 'P-001', name: 'Eversource Energy', category: 'utilities' },
+        { payeeId: 'P-002', name: 'AT&T Wireless', category: 'telecom' },
+      ]),
+      scheduleBillPay: async (params: any) => ({ confirmationId: 'BP-' + Date.now(), scheduled: true }),
+      getScheduledPayments: async () => ([]),
+      getPaymentMethods: notImplemented('nymbus.getPaymentMethods'),
+      getSettlementAccount: notImplemented('nymbus.getSettlementAccount'),
+    },
+    pricing: {
+      getSpotPrice: async (metal: string) => ({
+        metal,
+        askPrice: metal === 'gold' ? 2412.50 : metal === 'silver' ? 28.45 : 985.30,
+        currency: 'USD',
+        unit: 'oz',
+        timestamp: new Date().toISOString(),
+        source: 'ICE Benchmark',
+      }),
+      lockPrice: async (metal: string, direction: string, weightOz: number) => ({
+        lockId: 'LOCK-' + Date.now(),
+        metal, direction, weightOz,
+        lockedPrice: metal === 'gold' ? 2412.50 : 28.45,
+        expiresAt: new Date(Date.now() + 30000).toISOString(),
+      }),
+      getBidPrice: async (metal: string) => ({
+        metal,
+        bidPrice: metal === 'gold' ? 2408.20 : 28.32,
+        timestamp: new Date().toISOString(),
+      }),
+    },
+    wholesaler: {
+      checkAvailability: async (metal: string, weightOz: number) => ({
+        available: true, metal, weightOz, estimatedSettlement: '2 business days',
+      }),
+      executeOrder: notImplemented('wholesaler.executeOrder'),
+    },
+    custodian: {
+      getHoldings: async () => ([
+        { holdingId: 'H-001', metal: 'gold', weightOz: 25.0, vault: 'Delaware Depository', purity: 0.999 },
+        { holdingId: 'H-002', metal: 'silver', weightOz: 500.0, vault: 'Brinks Salt Lake', purity: 0.999 },
+      ]),
+      getVaultOptions: async () => ([
+        { vaultId: 'V-DD', name: 'Delaware Depository', location: 'Wilmington, DE' },
+        { vaultId: 'V-BSL', name: 'Brinks Salt Lake', location: 'Salt Lake City, UT' },
+      ]),
+      getEncumbranceStatus: async () => ({ encumbered: false, pledgedTo: null }),
+      getTransferFeeEstimate: async () => ({ fee: 45.00, currency: 'USD' }),
+      requestLock: notImplemented('custodian.requestLock'),
+      validateTransferRoute: notImplemented('custodian.validateTransferRoute'),
+      createTransferRequest: notImplemented('custodian.createTransferRequest'),
+      getLockStatus: notImplemented('custodian.getLockStatus'),
+    },
+    tilt: {
+      calculateIndicativeDSCR: async (noi: number, loanAmount: number, rate: number, term: number) => {
+        const annualDebtService = loanAmount * (rate / (1 - Math.pow(1 + rate, -term)));
+        const dscr = noi / annualDebtService;
+        return { indicativeDSCR: Math.round(dscr * 100) / 100, noi, loanAmount, disclaimer: 'Subject to underwriting' };
+      },
+      createLead: async (params: any) => ({ leadId: 'LEAD-' + Date.now(), status: 'new', ...params }),
+      getExistingBorrower: notImplemented('tilt.getExistingBorrower'),
+      getLoanPrograms: async () => ([
+        { name: 'DSCR 30-Year Fixed', minDSCR: 1.25, rateRange: '7.0-8.5%', ltv: 75 },
+        { name: 'Bridge 12-Month', minDSCR: 1.0, rateRange: '9.0-11.0%', ltv: 80 },
+      ]),
+    },
+    loanpro: {
+      getLoanDetails: async () => ({
+        loanId: 'LN-2025-001', balance: 1_250_000, rate: 0.075, maturity: '2030-03-01', status: 'current',
+      }),
+      getPaymentSchedule: async () => ([
+        { date: '2026-03-01', amount: 9_375.00, type: 'interest', status: 'upcoming' },
+      ]),
+      getPayoffQuote: async () => ({
+        payoffAmount: 1_255_200, validThrough: '2026-03-07', perDiem: 256.85,
+      }),
+      getEscrowBalance: async () => ({ balance: 18_750.00, lastDeposit: '2026-02-01' }),
+    },
+    eureka: {
+      getSettlementStatus: async () => ({
+        fileId: 'SF-2026-042', stage: 'docs_pending', parties: 3, pendingItems: 2,
+      }),
+      generateChecklist: async () => ([
+        { item: 'Title insurance commitment', status: 'pending' },
+        { item: 'Survey', status: 'received' },
+        { item: 'Wire instructions', status: 'pending' },
+      ]),
+      createSettlementFile: notImplemented('eureka.createSettlementFile'),
+      getPartyRequirements: notImplemented('eureka.getPartyRequirements'),
+    },
+    ifse: {
+      getPendingWires: async () => ([
+        { wireId: 'W-001', amount: 250_000, currency: 'USD', beneficiary: 'Deutsche Bank', status: 'pending_review' },
+      ]),
+      getFXExposure: async () => ({ totalExposure: 1_200_000, currency: 'EUR', hedgeRatio: 0.65 }),
+      getSettlementQueueStatus: async () => ({ pending: 12, inProgress: 3, completedToday: 28 }),
+      generateReconReport: async () => ({ matched: 145, unmatched: 3, exceptions: 1 }),
+      getCorridorStatus: notImplemented('ifse.getCorridorStatus'),
+      getFXQuote: notImplemented('ifse.getFXQuote'),
+      createWireRequest: notImplemented('ifse.createWireRequest'),
+    },
+    sanctions: {
+      screenBeneficiary: async () => ({ cleared: true, requiresManualReview: false }),
+    },
+    crm: {
+      createTicket: async (params: any) => ({ ticketId: 'TKT-' + Date.now(), status: 'open', createdAt: new Date(), updatedAt: new Date() }),
+      getTicketStatus: async () => ({ ticketId: 'TKT-001', status: 'open', createdAt: new Date(), updatedAt: new Date() }),
+      searchFAQ: async (query: string) => ([
+        { question: 'How do I reset my password?', answer: 'You can reset your password by visiting the login page and clicking Forgot Password.', relevanceScore: 0.9 },
+      ]),
+      getContact: async () => null,
+      getContactByPhone: async () => null,
+      getContactByEmail: async () => null,
+      createContact: async (params: any) => ({ contactId: 'C-' + Date.now(), ...params, source: 'voice_agent' }),
+      updateContact: async () => ({}),
+      createDeal: async (params: any) => ({ dealId: 'D-' + Date.now(), ...params }),
+      getDeal: async () => null,
+      updateDealStage: async () => ({}),
+      getDealsForContact: async () => ([]),
+      createLead: async () => ({}),
+      qualifyLead: async () => ({}),
+      assignLead: async () => {},
+      createTask: async () => ({}),
+      addNote: async () => ({ noteId: 'N-' + Date.now() }),
+      logCall: async () => 'CALL-' + Date.now(),
+      getActivityTimeline: async () => ([]),
+      enrollInSequence: async () => {},
+      removeFromSequence: async () => {},
+      triggerWorkflow: async () => {},
+      getAvailableSlots: async () => ([]),
+      bookAppointment: async () => ({ appointmentId: 'APT-' + Date.now(), status: 'scheduled' }),
+      cancelAppointment: async () => {},
+      addTag: async () => {},
+      removeTag: async () => {},
+      addToList: async () => {},
+      searchContacts: async () => ([]),
+      flagAccount: async () => {},
+      recordConsent: async () => {},
+      getConsentHistory: async () => ([]),
+    },
+    consent: consentService,
+    audit: auditService,
   };
 }
 
