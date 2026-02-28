@@ -1,0 +1,131 @@
+# ============================================================================
+# Calculus Voice Agent — Local Development Stack
+# ============================================================================
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose up -d postgres redis  # Just infra
+#   docker compose logs -f agent  # Watch agent logs
+#   docker compose down -v        # Tear down + delete volumes
+# ============================================================================
+
+version: '3.9'
+
+services:
+  # --------------------------------------------------------------------------
+  # PostgreSQL 15 — Session, audit, consent persistence
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: voiceai-postgres
+    environment:
+      POSTGRES_DB: voiceagent
+      POSTGRES_USER: calculus
+      POSTGRES_PASSWORD: calculus-dev-2026
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U calculus -d voiceagent']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # Redis 7 — Rate limiting, session cache, pub/sub for multi-instance
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: voiceai-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # Voice Agent
+  # --------------------------------------------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voiceai-agent
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      LOG_LEVEL: info
+
+      # Database
+      DATABASE_URL: postgresql://calculus:calculus-dev-2026@postgres:5432/voiceagent
+      REDIS_URL: redis://redis:6379
+
+      # LLM Providers (set in .env)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+
+      # STT / TTS
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_VERIFY_SID: ${TWILIO_VERIFY_SID:-}
+
+      # CRM
+      GHL_API_KEY: ${GHL_API_KEY:-}
+      GHL_LOCATION_ID_CT: ${GHL_LOCATION_ID_CT:-}
+      GHL_LOCATION_ID_TILT: ${GHL_LOCATION_ID_TILT:-}
+      GHL_LOCATION_ID_EUREKA: ${GHL_LOCATION_ID_EUREKA:-}
+      HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
+
+      # Feature Flags
+      GROK_VOICE_ENABLED: ${GROK_VOICE_ENABLED:-false}
+      ENABLE_OUTBOUND_AI_CALLS: 'false'
+      COMPLIANCE_ENFORCEMENT_MODE: strict
+
+      # Auth
+      AUTH_DEV_MODE: 'true'
+
+      # Voices
+      CARTESIA_VOICE_DMC: ${CARTESIA_VOICE_DMC:-}
+      CARTESIA_VOICE_CT: ${CARTESIA_VOICE_CT:-}
+      CARTESIA_VOICE_TILT: ${CARTESIA_VOICE_TILT:-}
+      CARTESIA_VOICE_EUREKA: ${CARTESIA_VOICE_EUREKA:-}
+      CARTESIA_VOICE_IFSE: ${CARTESIA_VOICE_IFSE:-}
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # Drizzle Studio — Database GUI (optional, dev only)
+  # --------------------------------------------------------------------------
+  drizzle-studio:
+    image: node:20-slim
+    container_name: voiceai-studio
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - '4983:4983'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://calculus:calculus-dev-2026@postgres:5432/voiceagent
+    command: npx drizzle-kit studio --host 0.0.0.0
+    profiles:
+      - studio
+
+volumes:
+  pgdata:
