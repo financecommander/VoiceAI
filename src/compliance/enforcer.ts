@@ -62,7 +62,7 @@ export const DEFAULT_COMPLIANCE_CONFIG: ComplianceConfig = {
   aiDisclosureStates: ['UT', 'CA', 'CO', 'TX'],
   optOutKeywords: [
     'stop', 'quit', 'cancel', 'unsubscribe', 'do not call',
-    'remove me', 'opt out', 'take me off', 'no more calls',
+    'remove me', 'opt out', 'take me off', 'no more calls', 'don\x27t call', 'don\x27t want you to call', 'call me anymore',
   ],
   humanHandoffKeywords: [
     'human', 'agent', 'representative', 'real person',
