@@ -27,6 +27,7 @@ import WebSocket from 'ws';
 import { v4 as uuid } from 'uuid';
 import type { Logger } from 'pino';
 import type { CalcModel, AuthTier } from '../types.js';
+import { CallPurpose, CallDirection, CallType } from '../types.js';
 import type { VoicePipelineController } from './pipeline-controller.js';
 import type { DeepgramSTTClient } from './deepgram-client.js';
 import type { CartesiaTTSClient } from './cartesia-client.js';
@@ -353,9 +354,9 @@ export class TwilioMediaStreamHandler {
 
     // Initialize the pipeline controller for this call
     const result = await this.pipelineController.initializeCall({
-      callDirection: this.sessionConfig.direction,
-      callType: this.sessionConfig.direction === 'inbound' ? 'inbound' : 'callback',
-      callPurpose: 'informational',
+      callDirection: this.sessionConfig.direction === 'inbound' ? CallDirection.INBOUND : CallDirection.OUTBOUND,
+      callType: this.sessionConfig.direction === 'inbound' ? CallType.SERVICE : CallType.CALLBACK,
+      callPurpose: CallPurpose.INFORMATIONAL,
       model: this.sessionConfig.model,
       recipientPhone: this.sessionConfig.callerPhone,
       recipientState: 'CT', // Would resolve from phone number in production

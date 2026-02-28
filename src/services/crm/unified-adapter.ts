@@ -442,7 +442,7 @@ export class UnifiedCRMAdapter implements ICRMService {
       if (!ticket) throw new Error(`Ticket ${ticketId} not found`);
       return {
         ticketId: ticket.id,
-        status: (ticket.properties?.hs_pipeline_stage as string) ?? 'open',
+        status: ((ticket.properties?.hs_pipeline_stage as string) ?? 'open') as 'open' | 'in_progress' | 'resolved' | 'closed',
         createdAt: ticket.createdAt,
         updatedAt: ticket.updatedAt,
       };

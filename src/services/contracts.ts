@@ -16,7 +16,8 @@ import type {
   SettlementFile,
   CustodyInstruction,
   WireInstruction,
-} from './types.js';
+  ChecklistItem,
+} from '../types.js';
 
 // ============================================================================
 // DMC Banking Services (Nymbus + Payment Ops)
@@ -1502,8 +1503,8 @@ export interface DNCResult {
 
 export interface IAuditService {
   /** Log an audit event (append-only) */
-  logEvent(event: Omit<import('./types.js').AuditEvent, 'eventId'>): Promise<string>;
+  logEvent(event: Omit<import('../types.js').AuditEvent, 'eventId'>): Promise<string>;
 
   /** Get audit trail for a conversation */
-  getConversationAudit(conversationId: string): Promise<import('./types.js').AuditEvent[]>;
+  getConversationAudit(conversationId: string): Promise<import('../types.js').AuditEvent[]>;
 }

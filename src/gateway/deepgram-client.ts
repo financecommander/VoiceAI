@@ -145,7 +145,7 @@ export class DeepgramSTTClient extends EventEmitter {
     if (!this.connection || !this.isConnected) return;
 
     try {
-      this.connection.send(pcmChunk);
+      (this.connection as any).send(pcmChunk);
     } catch (error) {
       this.logger.error({ error }, 'Failed to send audio to Deepgram');
     }

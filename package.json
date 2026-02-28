@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^3.9.0",
-    "cartesia": "^1.2.0",
+    "@cartesia/cartesia-js": "^2.2.0",
     "openai": "^4.77.0",
     "@anthropic-ai/sdk": "^0.39.0",
     "@hubspot/api-client": "^13.4.0",

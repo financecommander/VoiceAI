@@ -240,7 +240,7 @@ function createMockAuditService() {
   };
 }
 
-function createMockServiceRegistry(consentService: any, auditService: any) {
+function createMockServiceRegistry(consentService: any, auditService: any): any {
   const notImplemented = (name: string) => async (..._args: any[]) => {
     logger.warn({ service: name }, 'Mock service called — not implemented');
     return { mock: true, service: name };

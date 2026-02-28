@@ -160,6 +160,7 @@ export class ToolExecutor {
       return this.services.nymbus.scheduleBillPay({
         customerId: cid,
         payeeId: args.payeeId as string,
+        fromAccountId: args.fromAccountId as string ?? 'default',
         amount: args.amount as number,
         scheduledDate: new Date(args.scheduledDate as string),
         conversationId: args.conversationId as string,
@@ -171,17 +172,21 @@ export class ToolExecutor {
 
     // --- Pricing (Constitutional Tender) ---
     if (toolName === 'pricing_getSpotPrice') {
-      return this.services.pricing.getSpotPrice(args.metal as string);
+      return this.services.pricing.getSpotPrice(args.metal as 'gold' | 'silver' | 'platinum');
     }
     if (toolName === 'pricing_lockPrice') {
-      return this.services.pricing.lockPrice(
-        args.metal as string,
-        args.direction as 'buy' | 'sell',
-        args.weightOz as number,
-      );
+      return this.services.pricing.lockPrice({
+        metal: args.metal as string,
+        product: 'standard',
+        quantity: args.weightOz as number,
+        type: 'vault_allocation',
+      });
     }
     if (toolName === 'pricing_getBidPrice') {
-      return this.services.pricing.getBidPrice(args.metal as string);
+      return this.services.pricing.getBidPrice(
+        args.metal as 'gold' | 'silver' | 'platinum',
+        args.weightOz as number ?? 1,
+      );
     }
 
     // --- Wholesaler ---
@@ -209,31 +214,40 @@ export class ToolExecutor {
       return this.services.custodian.getTransferFeeEstimate(
         args.fromVault as string,
         args.toVault as string,
-        args.metal as string,
-        args.weightOz as number,
+        args.weightOz as number ?? 1,
+        args.metal as string ?? 'gold',
       );
     }
 
     // --- TILT Lending ---
     if (toolName === 'tilt_calculateIndicativeDSCR') {
-      return this.services.tilt.calculateIndicativeDSCR(
-        args.noi as number,
-        args.loanAmount as number,
-        args.interestRate as number,
-        args.termYears as number,
-      );
+      return this.services.tilt.calculateIndicativeDSCR({
+        noi: args.noi as number,
+        loanAmount: args.loanAmount as number,
+        estimatedRate: args.interestRate as number,
+        termYears: args.termYears as number,
+      });
     }
     if (toolName === 'tilt_createLead') {
       return this.services.tilt.createLead({
+        source: (args.source as 'voice_agent' | 'web' | 'broker_referral' | 'arbor' | 'costar') ?? 'voice_agent',
+        callerType: (args.callerType as 'broker' | 'borrower') ?? 'borrower',
+        borrowerName: args.borrowerName as string ?? '',
         propertyType: args.propertyType as string,
-        propertyLocation: args.propertyLocation as string,
-        requestedAmount: args.requestedAmount as number,
-        noi: args.noi as number | undefined,
-        borrowerName: args.borrowerName as string,
-        borrowerPhone: args.borrowerPhone as string | undefined,
-        borrowerEmail: args.borrowerEmail as string | undefined,
-        borrowerExperience: args.borrowerExperience as string | undefined,
-        source: args.source as string,
+        propertyAddress: (args.propertyLocation as string) ?? '',
+        status: 'stabilized' as const,
+        grossRentalIncome: (args.noi as number) ?? 0,
+        operatingExpenses: 0,
+        noi: (args.noi as number) ?? 0,
+        propertyValue: (args.requestedAmount as number) ?? 0,
+        requestedLoanAmount: (args.requestedAmount as number) ?? 0,
+        ltv: 0,
+        indicativeDscr: null,
+        preScreenResult: 'fits_program',
+        contactPhone: (args.borrowerPhone as string) ?? '',
+        contactEmail: (args.borrowerEmail as string) ?? '',
+        conversationId: '',
+        createdByAgent: true,
       });
     }
     if (toolName === 'tilt_getLoanPrograms') {
@@ -259,10 +273,7 @@ export class ToolExecutor {
       return this.services.eureka.getSettlementStatus(args.fileId as string);
     }
     if (toolName === 'eureka_generateChecklist') {
-      return this.services.eureka.generateChecklist(
-        args.fileId as string,
-        args.partyRole as string,
-      );
+      return this.services.eureka.generateChecklist(args.fileId as string);
     }
 
     // --- IFSE Treasury ---
@@ -270,20 +281,20 @@ export class ToolExecutor {
       return this.services.ifse.getPendingWires();
     }
     if (toolName === 'ifse_getFXExposure') {
-      return this.services.ifse.getFXExposure(args.date as string);
+      return this.services.ifse.getFXExposure(new Date(args.date as string));
     }
     if (toolName === 'ifse_getSettlementQueueStatus') {
       return this.services.ifse.getSettlementQueueStatus();
     }
     if (toolName === 'ifse_generateReconReport') {
-      return this.services.ifse.generateReconReport(args.date as string);
+      return this.services.ifse.generateReconReport(new Date(args.date as string));
     }
 
     // --- Sanctions ---
     if (toolName === 'sanctions_screenBeneficiary') {
       const result = await this.services.sanctions.screenBeneficiary(
         args.name as string,
-        args.country as string | undefined,
+        (args.country as string) ?? '',
       );
       // NEVER reveal match details to customer
       return { cleared: result.cleared, requiresManualReview: result.requiresManualReview };

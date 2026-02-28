@@ -125,7 +125,7 @@ export class HubSpotService implements IHubSpotService {
     const response = await this.client.crm.contacts.searchApi.doSearch({
       filterGroups: [{ filters: filters.map(f => ({
         propertyName: f.propertyName,
-        operator: f.operator,
+        operator: f.operator as any,
         value: f.value,
       })) }],
       properties: [
@@ -134,7 +134,7 @@ export class HubSpotService implements IHubSpotService {
       ],
       limit: 100,
       after: '0',
-      sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+      sorts: ['-createdate'],
     });
 
     return response.results.map(r => this.mapContact(r));
@@ -153,9 +153,13 @@ export class HubSpotService implements IHubSpotService {
 
   async mergeContacts(primaryId: string, secondaryId: string): Promise<void> {
     this.logger.info({ primaryId, secondaryId }, 'Merging HubSpot contacts');
-    await this.client.crm.contacts.publicObjectApi.merge({
-      objectIdToMerge: secondaryId,
-      primaryObjectId: primaryId,
+    await this.client.apiRequest({
+      method: 'POST',
+      path: '/crm/v3/objects/contacts/merge',
+      body: {
+        objectIdToMerge: secondaryId,
+        primaryObjectId: primaryId,
+      },
     });
   }
 
@@ -211,7 +215,7 @@ export class HubSpotService implements IHubSpotService {
       properties: ['dealname', 'dealstage', 'pipeline', 'amount', 'closedate'],
       limit: 100,
       after: '0',
-      sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+      sorts: ['-createdate'],
     });
 
     return response.results.map(r => this.mapDeal(r));

@@ -400,7 +400,7 @@ export interface AuditEvent {
   createdByAgent: boolean;
 }
 
-export type AuditEventType =
+export type AuditEventType = 'tool_executed' | 'tool_error'
   | 'call_started'
   | 'call_ended'
   | 'auth_upgraded'
