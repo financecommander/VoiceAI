@@ -9,7 +9,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { Database } from '../db/client.js';
 import { consentRecords, dncList } from '../db/schema.js';
-import type { IConsentService } from './contracts.js';
+import type { IConsentService, CaptureConsentParams, ConsentRecord, RevocationParams } from './contracts.js';
 
 export class ConsentServiceImpl implements IConsentService {
   private db: Database;
@@ -54,40 +54,57 @@ export class ConsentServiceImpl implements IConsentService {
     };
   }
 
-  async captureConsent(params: any): Promise<any> {
+  async captureConsent(params: CaptureConsentParams): Promise<ConsentRecord> {
     const [record] = await this.db.insert(consentRecords).values({
       phone: params.phone,
       customerId: params.customerId ?? null,
-      model: params.model as any,
-      consentType: params.type as any,
-      scope: params.scope ?? 'voice_ai',
-      capturedVia: params.capturedVia,
+      model: 'DMC' as any, // Default model — caller should set via context
+      consentType: params.consentType as any,
+      scope: 'voice_ai',
+      capturedVia: params.method,
       capturedConversationId: params.conversationId ?? null,
       capturedByAgent: true,
     }).returning();
 
     this.logger.info({
       phone: params.phone,
-      model: params.model,
-      type: params.type,
+      type: params.consentType,
     }, 'Consent captured');
 
-    return record;
+    // Map DB record to ConsentRecord interface
+    return {
+      phone: record.phone,
+      customerId: record.customerId ?? undefined,
+      aiWrittenConsent: params.consentType === 'ai_written',
+      aiConsentTimestamp: params.consentType === 'ai_written' ? new Date() : null,
+      aiConsentSeller: params.consentType === 'ai_written' ? params.seller : null,
+      automatedConsent: params.consentType === 'automated',
+      automatedConsentTimestamp: params.consentType === 'automated' ? new Date() : null,
+      recordingConsent: params.consentType === 'recording',
+      callbackRequested: params.consentType === 'callback',
+      callbackRequestedAt: params.consentType === 'callback' ? new Date() : null,
+      ebrStatus: false,
+      ebrLastTransaction: null,
+      revocationHistory: [],
+      reOptedInAfterLastRevocation: false,
+    };
   }
 
-  async revokeConsent(phone: string, params?: any): Promise<void> {
+  async revokeConsent(phone: string, params: RevocationParams): Promise<void> {
     const conditions = [eq(consentRecords.phone, phone), eq(consentRecords.status, 'active')];
-    if (params?.model) conditions.push(eq(consentRecords.model, params.model as any));
+    if (params.scope === 'marketing_only') {
+      conditions.push(eq(consentRecords.consentType, 'automated' as any));
+    }
 
     await this.db.update(consentRecords).set({
       status: 'revoked',
       revokedAt: new Date(),
-      revokedVia: 'voice_agent',
-      revokedConversationId: params?.conversationId ?? null,
+      revokedVia: params.method,
+      revokedConversationId: params.conversationId ?? null,
       updatedAt: new Date(),
     }).where(and(...conditions));
 
-    this.logger.info({ phone }, 'Consent revoked');
+    this.logger.info({ phone, method: params.method, scope: params.scope }, 'Consent revoked');
   }
 
   async checkDNC(phone: string): Promise<{

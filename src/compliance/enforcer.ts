@@ -63,7 +63,6 @@ export const DEFAULT_COMPLIANCE_CONFIG: ComplianceConfig = {
   optOutKeywords: [
     'stop', 'quit', 'cancel', 'unsubscribe', 'do not call',
     'remove me', 'opt out', 'take me off', 'no more calls',
-    "don't call", "don't want you to call", "call me anymore",
   ],
   humanHandoffKeywords: [
     'human', 'agent', 'representative', 'real person',
@@ -522,13 +521,15 @@ export class ComplianceEnforcer {
 
     // Fuzzy matching for natural language opt-outs
     const fuzzyOptOutPatterns = [
-      /don'?t\s+(call|contact|phone)\s+me/i,
+      /don'?t\s+(?:\w+\s+)*(?:call|contact|phone)\s+me/i,
       /stop\s+(calling|contacting)/i,
+      /i\s+don'?t\s+want\s+(?:\w+\s+)*(?:to\s+)?(?:call|contact|hear)/i,
       /i\s+want\s+(to\s+)?(stop|opt\s*out|be\s+removed)/i,
       /take\s+me\s+off/i,
       /no\s+more\s+(calls|messages)/i,
       /please\s+don'?t\s+call/i,
       /leave\s+me\s+alone/i,
+      /call\s+me\s+anymore/i,
     ];
 
     for (const pattern of fuzzyOptOutPatterns) {

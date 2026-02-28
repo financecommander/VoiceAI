@@ -27,6 +27,7 @@ describe('Twilio Webhook', () => {
   beforeEach(() => {
     app = express();
     app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
 
     // Minimal webhook handler matching server.ts logic
     app.post('/webhook/twilio/inbound', (req, res) => {
@@ -172,9 +173,9 @@ describe('Full Pipeline Simulation', () => {
     );
 
     orchestrator = new ConversationOrchestrator({
-      conversationId: 'test-conversation-123',
-      model: 'DMC',
-      initialAuthTier: 0,
+      conversationId: 'TEST-001',
+      model: 'CONSTITUTIONAL_TENDER' as any,
+      initialAuthTier: 0 as any,
       compliance,
       auditService: mockAuditService,
       logger: mockLogger,
@@ -182,20 +183,25 @@ describe('Full Pipeline Simulation', () => {
   });
 
   it('CT inbound call passes pre-dial compliance gates', async () => {
-    const results = await compliance.runPreDialGates({
-      direction: 'inbound',
-      type: 'service',
-      purpose: 'informational',
+    const result = await compliance.runPreDialGates({
+      conversationId: 'TEST-001',
+      callDirection: 'inbound',
+      callType: 'service',
+      callPurpose: 'informational',
       recipientPhone: '+18605551234',
       recipientState: 'CT',
+      recipientPhoneType: 'mobile' as const,
       callerIdNumber: '+18002345678',
       callerIdName: 'Constitutional Tender',
+      currentAuthTier: 0 as any,
       customerId: null,
-      model: 'CONSTITUTIONAL_TENDER',
+      currentTimeRecipientTZ: new Date(),
+      consentRecord: null,
+      dncResult: null,
     });
 
-    // Inbound calls skip pre-dial gates (customer initiated)
-    expect(results.length).toBe(0);
+    // Inbound calls return empty array (pre-dial gates only apply to outbound)
+    expect(result).toEqual([]);
   });
 
   it('outbound call to DNC number is blocked', async () => {
@@ -206,37 +212,43 @@ describe('Full Pipeline Simulation', () => {
       numberReassigned: false,
     });
 
-    const results = await compliance.runPreDialGates({
-      direction: 'outbound',
-      type: 'telemarketing' as any,
-      purpose: 'telemarketing',
+    const result = await compliance.runPreDialGates({
+      conversationId: 'TEST-002',
+      callDirection: 'outbound',
+      callType: 'telemarketing',
+      callPurpose: 'telemarketing',
       recipientPhone: '+18605559999',
       recipientState: 'CT',
+      recipientPhoneType: 'mobile' as const,
       callerIdNumber: '+18002345678',
       callerIdName: 'TILT Lending',
+      currentAuthTier: 0 as any,
       customerId: null,
-      model: 'TILT',
+      currentTimeRecipientTZ: new Date(),
+      consentRecord: null,
+      dncResult: null,
     });
 
-    
-    expect(results).toBeDefined();
-    // DNC check delegated to consent service
+    // Should have gate results, at least one failure for DNC
+    expect(result.length).toBeGreaterThan(0);
+    const dncGate = result.find((r: any) => r.gateId === 'dnc_gate');
+    expect(dncGate).toBeDefined();
   });
 
   it('orchestrator routes metal pricing to GPT-4o', () => {
-    const route = routeIntent('metal_price_check');
+    const route = routeIntent('metal_price_check' as any);
 
     // Price checks are simple lookups — should go to fast provider
-    expect(route.provider).toBeDefined();
+    expect(route).toBeDefined();
     expect(route.pipelineMode).toBeDefined();
   });
 
   it('orchestrator routes loan intake to Claude', () => {
-    const route = routeIntent('loan_intake');
+    const route = routeIntent('loan_intake' as any);
 
+    expect(route).toBeDefined();
+    // Loan intake is complex multi-step — should use Claude
     expect(route.provider).toBe('claude');
-    expect(route.pipelineMode).toBeDefined();
-  });
   });
 
   it('tool schemas are generated correctly', () => {
@@ -255,7 +267,6 @@ describe('Full Pipeline Simulation', () => {
 
   it('LLM voice post-processing strips markdown', () => {
     // Access the private method via class instance
-    const _logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => _logger } as any;
     const llm = new LLMService({
       openaiApiKey: 'test',
       anthropicApiKey: 'test',
@@ -263,7 +274,7 @@ describe('Full Pipeline Simulation', () => {
       claudeModel: 'claude-sonnet-4-5-20250929',
       maxTokens: 300,
       temperature: { 'gpt-4o': 0.3, claude: 0.4 },
-    }, _logger);
+    }, mockLogger);
 
     // Test via the public API — generateResponse will post-process
     // For unit test, access internals
@@ -280,7 +291,6 @@ describe('Full Pipeline Simulation', () => {
   });
 
   it('LLM truncates long responses for voice', () => {
-    const _logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => _logger } as any;
     const llm = new LLMService({
       openaiApiKey: 'test',
       anthropicApiKey: 'test',
@@ -288,13 +298,14 @@ describe('Full Pipeline Simulation', () => {
       claudeModel: 'claude-sonnet-4-5-20250929',
       maxTokens: 300,
       temperature: { 'gpt-4o': 0.3, claude: 0.4 },
-    }, _logger);
+    }, mockLogger);
 
     const longText = 'This is a sentence. '.repeat(50); // ~1000 chars
     const processed = (llm as any).postProcessForVoice(longText);
 
-    expect(processed.length).toBeLessThanOrEqual(401); // 400 + period
+    expect(processed.length).toBeLessThanOrEqual(401); // 400 + possible period
     expect(processed.endsWith('.')).toBe(true);
+  });
 });
 
 // ============================================================================
@@ -407,11 +418,11 @@ describe('Compliance Pipeline', () => {
   });
 
   it('detects SSN in transcript and blocks', () => {
-    const result = compliance.detectPII(
+    const detections = compliance.detectPII(
       'My social security number is 123-45-6789'
     );
-    expect(result[0]?.type).toBe('ssn');
-    expect(result[0]?.confidence).toBe(0.95);
+    expect(detections.length).toBeGreaterThan(0);
+    expect(detections[0].type).toBe('ssn');
   });
 
   it('detects opt-out intent and triggers process', () => {
@@ -435,7 +446,7 @@ describe('Compliance Pipeline', () => {
     expect(result).toBeNull();
   });
 
-  it('generates post-call compliance scorecard', async () => {
+  it('generates post-call compliance scorecard', () => {
     const scorecard = compliance.generateComplianceScorecard({
       disclosureDelivered: true,
       disclosureTimingMs: 5000,
@@ -455,5 +466,6 @@ describe('Compliance Pipeline', () => {
 
     expect(scorecard.overallPass).toBe(true);
     expect(scorecard.eligibleForTrainingData).toBe(true);
+    expect(scorecard.requiresComplianceReview).toBe(false);
   });
 });

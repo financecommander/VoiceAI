@@ -641,7 +641,10 @@ export class ConversationOrchestrator {
       DMC: 'Sal',           // Warm, approachable for retail banking
       CONSTITUTIONAL_TENDER: 'Eve',   // Professional, measured for metals
       TILT: 'Mika',         // Confident for commercial lending
+      MORTGAGE: 'Mika',     // Confident for residential lending
+      REAL_ESTATE: 'Sal',   // Warm for buyer/seller coordination
       EUREKA: 'Eve',        // Professional for settlement
+      LOAN_SERVICING: 'Sal', // Approachable for servicing calls
       IFSE: 'Ani',          // Direct for internal ops
     };
     return voiceMap[model];
@@ -709,6 +712,42 @@ export class ConversationOrchestrator {
         // HubSpot CRM (IFSE — internal ops tracking)
         'hubspot_createTicket', 'hubspot_getTicket', 'hubspot_createNote',
       ],
+      MORTGAGE: [
+        'mortgage_getRates', 'mortgage_getPrograms', 'mortgage_calculatePayment',
+        'mortgage_startApplication', 'mortgage_saveProgress',
+        'mortgage_sendDisclosures', 'mortgage_getDisclosureStatus',
+        'mortgage_lockRate',
+        // GoHighLevel CRM
+        'ghl_getContact', 'ghl_createContact', 'ghl_updateContact',
+        'ghl_createOpportunity', 'ghl_moveOpportunityStage',
+        'ghl_bookAppointment', 'ghl_getAvailableSlots',
+        'ghl_sendSMS', 'ghl_sendEmail', 'ghl_logCall', 'ghl_createNote',
+        'ghl_addContactToWorkflow', 'ghl_createTask',
+      ],
+      REAL_ESTATE: [
+        're_searchListings', 're_getPropertyDetails', 're_getComparables',
+        're_submitOffer', 're_getOfferStatus', 're_counterOffer',
+        're_scheduleShowing', 're_getAvailability', 're_cancelShowing',
+        're_getTransactionStatus', 're_getDocumentChecklist', 're_getTimeline',
+        're_requestDocument', 're_uploadStatus',
+        // GoHighLevel CRM
+        'ghl_getContact', 'ghl_createContact', 'ghl_updateContact',
+        'ghl_createOpportunity', 'ghl_moveOpportunityStage',
+        'ghl_bookAppointment', 'ghl_getAvailableSlots',
+        'ghl_sendSMS', 'ghl_sendEmail', 'ghl_logCall', 'ghl_createNote',
+        'ghl_addContactToWorkflow', 'ghl_createTask',
+      ],
+      LOAN_SERVICING: [
+        'loanpro_getLoanDetails', 'loanpro_getPaymentHistory', 'loanpro_getNextPayment',
+        'loanpro_makePayment', 'loanpro_setupAutoPay', 'loanpro_getPaymentMethods',
+        'loanpro_getPayoffQuote', 'loanpro_emailPayoffStatement',
+        'loanpro_getEscrowDetails', 'loanpro_getEscrowProjection',
+        'loanpro_startModification', 'loanpro_getModificationStatus',
+        'loanpro_getForbearanceOptions',
+        // HubSpot CRM (existing borrower relationships)
+        'hubspot_getContact', 'hubspot_updateContact',
+        'hubspot_createTicket', 'hubspot_logCall', 'hubspot_createNote',
+      ],
     };
     return toolMap[model] ?? [];
   }
@@ -754,6 +793,27 @@ export class ConversationOrchestrator {
         { name: 'getPendingWires', description: 'List pending wires', parameters: {} },
         { name: 'getSettlementQueueStatus', description: 'Get settlement queue status', parameters: {} },
         { name: 'generateReconReport', description: 'Generate reconciliation report', parameters: { date: 'string' } },
+      ],
+      MORTGAGE: [
+        { name: 'mortgage_getRates', description: 'Get current mortgage rates by program', parameters: {} },
+        { name: 'mortgage_getPrograms', description: 'List available mortgage programs', parameters: {} },
+        { name: 'mortgage_calculatePayment', description: 'Estimate monthly payment', parameters: { loanAmount: 'number', rate: 'number', termYears: 'number' } },
+        { name: 'ghl_getContact', description: 'Look up borrower in CRM', parameters: { contactId: 'string' } },
+        { name: 'ghl_getAvailableSlots', description: 'Check loan officer availability', parameters: { calendarId: 'string', date: 'string' } },
+      ],
+      REAL_ESTATE: [
+        { name: 're_searchListings', description: 'Search active property listings', parameters: { location: 'string', priceMax: 'number', beds: 'number' } },
+        { name: 're_getPropertyDetails', description: 'Get property details', parameters: { propertyId: 'string' } },
+        { name: 're_getComparables', description: 'Get comparable sales', parameters: { propertyId: 'string' } },
+        { name: 're_getAvailability', description: 'Check showing availability', parameters: { propertyId: 'string', date: 'string' } },
+        { name: 'ghl_getContact', description: 'Look up client in CRM', parameters: { contactId: 'string' } },
+      ],
+      LOAN_SERVICING: [
+        { name: 'loanpro_getLoanDetails', description: 'Get loan details and current balance', parameters: { borrowerId: 'string' } },
+        { name: 'loanpro_getPaymentHistory', description: 'Get payment history', parameters: { loanId: 'string' } },
+        { name: 'loanpro_getNextPayment', description: 'Get next payment details', parameters: { loanId: 'string' } },
+        { name: 'loanpro_getEscrowDetails', description: 'Get escrow account breakdown', parameters: { loanId: 'string' } },
+        { name: 'hubspot_getContact', description: 'Look up borrower in CRM', parameters: { contactId: 'string' } },
       ],
     };
     return readOnlyMap[model] ?? [];

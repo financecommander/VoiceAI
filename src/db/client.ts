@@ -38,7 +38,7 @@ export function getDatabase(config: DatabaseConfig, logger: Logger): Database {
     connectionTimeoutMillis: config.connectionTimeoutMs,
   });
 
-  pool.on('error', (err) => {
+  pool.on('error', (err: Error) => {
     logger.error({ error: err }, 'Database pool error');
   });
 

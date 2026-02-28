@@ -28,7 +28,10 @@ export enum CalcModel {
   DMC = 'DMC',
   CONSTITUTIONAL_TENDER = 'CONSTITUTIONAL_TENDER',
   TILT = 'TILT',
+  MORTGAGE = 'MORTGAGE',
+  REAL_ESTATE = 'REAL_ESTATE',
   EUREKA = 'EUREKA',
+  LOAN_SERVICING = 'LOAN_SERVICING',
   IFSE = 'IFSE',
 }
 
@@ -400,7 +403,7 @@ export interface AuditEvent {
   createdByAgent: boolean;
 }
 
-export type AuditEventType = 'tool_executed' | 'tool_error'
+export type AuditEventType =
   | 'call_started'
   | 'call_ended'
   | 'auth_upgraded'
@@ -421,4 +424,6 @@ export type AuditEventType = 'tool_executed' | 'tool_error'
   | 'order_created'
   | 'transfer_initiated'
   | 'lead_captured'
-  | 'settlement_created';
+  | 'settlement_created'
+  | 'tool_executed'
+  | 'tool_error';

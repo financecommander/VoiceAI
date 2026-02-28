@@ -9,7 +9,7 @@ import { eq, desc } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { Database } from '../db/client.js';
 import { auditEvents, voiceSessions } from '../db/schema.js';
-import type { AuditEvent, AuditEventType } from '../types.js';
+import type { AuditEvent, AuditEventType, CalcModel, AuthTier } from '../types.js';
 import type { IAuditService } from './contracts.js';
 
 export class AuditServiceImpl implements IAuditService {
@@ -65,14 +65,14 @@ export class AuditServiceImpl implements IAuditService {
     return rows.map(row => ({
       eventId: row.id,
       conversationId: row.conversationId,
-      model: row.model as any,
+      model: row.model as CalcModel,
       eventType: row.eventType as AuditEventType,
-      authTier: Number(row.authTier),
+      authTier: Number(row.authTier) as AuthTier,
       customerId: row.customerId ?? null,
-      intent: (row.intent as any) ?? null,
+      intent: (row.intent ?? null) as AuditEvent['intent'],
       action: row.action ?? null,
       result: row.result ?? null,
-      metadata: (row.metadata as any) ?? null,
+      metadata: (row.metadata as Record<string, unknown>) ?? {},
       createdByAgent: row.createdByAgent,
       timestamp: row.timestamp,
     }));

@@ -27,8 +27,12 @@ import { HubSpotService } from '../services/crm/hubspot-service.js';
 import { UnifiedCRMAdapter, DEFAULT_CRM_ROUTING } from '../services/crm/unified-adapter.js';
 import { LLMService } from '../llm/provider.js';
 import { ToolExecutor } from '../llm/tool-executor.js';
+import { requireValidEnvironment } from '../config/env-validation.js';
 
 dotenv.config();
+
+// Fail fast if required env vars are missing
+// (runs after dotenv so .env file is loaded first)
 
 // ============================================================================
 // Logger
@@ -40,6 +44,9 @@ const logger = pino({
     ? { target: 'pino-pretty' }
     : undefined,
 });
+
+// Validate environment — fail fast if required vars are missing
+requireValidEnvironment(logger);
 
 // ============================================================================
 // Express App

@@ -32,7 +32,7 @@ import {
 // ============================================================================
 
 export const calcModelEnum = pgEnum('calc_model', [
-  'DMC', 'CONSTITUTIONAL_TENDER', 'TILT', 'EUREKA', 'IFSE',
+  'DMC', 'CONSTITUTIONAL_TENDER', 'TILT', 'MORTGAGE', 'REAL_ESTATE', 'EUREKA', 'LOAN_SERVICING', 'IFSE',
 ]);
 
 export const callDirectionEnum = pgEnum('call_direction', ['inbound', 'outbound']);

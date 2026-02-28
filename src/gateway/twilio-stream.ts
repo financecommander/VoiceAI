@@ -219,11 +219,15 @@ export interface TwilioSessionConfig {
 // ============================================================================
 
 const PHONE_MODEL_MAP: Record<string, CalcModel> = {
-  // These would be configured from env in production
-  '+18001234567': 'DMC' as CalcModel,
-  '+18002345678': 'CONSTITUTIONAL_TENDER' as CalcModel,
-  '+18003456789': 'TILT' as CalcModel,
-  '+18004567890': 'EUREKA' as CalcModel,
+  // Production: load from env vars; fallback to placeholders for dev
+  [process.env.PHONE_DMC || '+18001234567']: 'DMC' as CalcModel,
+  [process.env.PHONE_CT || '+18002345678']: 'CONSTITUTIONAL_TENDER' as CalcModel,
+  [process.env.PHONE_TILT || '+18003456789']: 'TILT' as CalcModel,
+  [process.env.PHONE_MORTGAGE || '+18004567890']: 'MORTGAGE' as CalcModel,
+  [process.env.PHONE_REAL_ESTATE || '+18005678901']: 'REAL_ESTATE' as CalcModel,
+  [process.env.PHONE_EUREKA || '+18006789012']: 'EUREKA' as CalcModel,
+  [process.env.PHONE_LOAN_SERVICING || '+18007890123']: 'LOAN_SERVICING' as CalcModel,
+  [process.env.PHONE_IFSE || '+18008901234']: 'IFSE' as CalcModel,
 };
 
 export function resolveModelFromNumber(phone: string): CalcModel {

@@ -11,7 +11,7 @@
  */
 
 import type { Logger } from 'pino';
-import type { AuthTier, CalcModel } from '../types.js';
+import type { AuthTier, CalcModel, LoanApplicationLead } from '../types.js';
 import type {
   INymbusService,
   IPricingService,
@@ -135,7 +135,7 @@ export class ToolExecutor {
   private async dispatch(
     toolName: string,
     args: Record<string, unknown>,
-    context: { customerId: string | null },
+    context: { customerId: string | null; conversationId: string },
   ): Promise<unknown> {
     const cid = (args.customerId as string) ?? context.customerId ?? '';
 
@@ -230,23 +230,27 @@ export class ToolExecutor {
     }
     if (toolName === 'tilt_createLead') {
       return this.services.tilt.createLead({
-        source: (args.source as 'voice_agent' | 'web' | 'broker_referral' | 'arbor' | 'costar') ?? 'voice_agent',
-        callerType: (args.callerType as 'broker' | 'borrower') ?? 'borrower',
-        borrowerName: (args.borrowerName as string) ?? '',
-        propertyType: (args.propertyType as string) ?? '',
-        propertyAddress: (args.propertyLocation as string) ?? '',
-        status: 'stabilized' as const,
-        grossRentalIncome: (args.noi as number) ?? 0,
-        operatingExpenses: 0,
+        source: (args.source as string ?? 'voice_agent') as LoanApplicationLead['source'],
+        callerType: (args.callerType as string ?? 'borrower') as 'broker' | 'borrower',
+        brokerName: args.brokerName as string | undefined,
+        brokerCompany: args.brokerCompany as string | undefined,
+        borrowerName: args.borrowerName as string | undefined,
+        propertyType: args.propertyType as string,
+        propertyAddress: (args.propertyAddress ?? args.propertyLocation ?? '') as string,
+        units: args.units as number | undefined,
+        squareFeet: args.squareFeet as number | undefined,
+        status: (args.status as string ?? 'stabilized') as 'stabilized' | 'value_add' | 'construction',
+        grossRentalIncome: (args.grossRentalIncome as number) ?? 0,
+        operatingExpenses: (args.operatingExpenses as number) ?? 0,
         noi: (args.noi as number) ?? 0,
-        propertyValue: (args.requestedAmount as number) ?? 0,
+        propertyValue: (args.propertyValue as number) ?? 0,
         requestedLoanAmount: (args.requestedAmount as number) ?? 0,
-        ltv: 0,
-        indicativeDscr: null,
-        preScreenResult: 'fits_program' as const,
-        contactPhone: (args.borrowerPhone as string) ?? '',
-        contactEmail: (args.borrowerEmail as string) ?? '',
-        conversationId: '',
+        ltv: (args.ltv as number) ?? 0,
+        indicativeDscr: (args.indicativeDscr as number) ?? null,
+        preScreenResult: (args.preScreenResult as string ?? 'marginal') as 'fits_program' | 'marginal' | 'outside_parameters',
+        contactPhone: (args.borrowerPhone ?? args.contactPhone ?? '') as string,
+        contactEmail: (args.borrowerEmail ?? args.contactEmail ?? '') as string,
+        conversationId: context.conversationId,
         createdByAgent: true,
       });
     }
