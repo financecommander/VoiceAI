@@ -1,0 +1,46 @@
+{
+  "name": "@calculus/voice-agent",
+  "version": "0.1.0",
+  "description": "AI Voice Agent for Calculus Models — DMC, Constitutional Tender, TILT, Eureka, IFSE",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "^3.9.0",
+    "cartesia": "^1.2.0",
+    "openai": "^4.77.0",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@hubspot/api-client": "^13.4.0",
+    "ws": "^8.18.0",
+    "express": "^4.21.0",
+    "zod": "^3.24.0",
+    "ioredis": "^5.4.0",
+    "pg": "^8.13.0",
+    "drizzle-orm": "^0.38.0",
+    "pino": "^9.6.0",
+    "dotenv": "^16.4.0",
+    "uuid": "^11.0.0",
+    "libphonenumber-js": "^1.11.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "@types/express": "^5.0.0",
+    "@types/uuid": "^10.0.0",
+    "eslint": "^9.0.0",
+    "drizzle-kit": "^0.30.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

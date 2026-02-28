@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build
+dist/
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
+!src/**/*.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test
+coverage/
+
+# Temp
+tmp/
+temp/

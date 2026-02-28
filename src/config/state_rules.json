@@ -1,0 +1,140 @@
+{
+  "$schema": "state_rules_v1",
+  "version": "2026.02.15",
+  "lastReviewedBy": "legal_counsel",
+  "states": {
+    "CT": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Connecticut — Sean's primary operating state. Two-party consent for recording."
+    },
+    "CA": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": true,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "ccpaApplies": true,
+      "notes": "California. Two-party consent. CCPA applies for AI decision-making disclosure."
+    },
+    "TX": {
+      "twoPartyConsent": false,
+      "aiDisclosureRequired": true,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "sb140": true,
+      "notes": "Texas SB 140 expands telephone solicitation to texts. DTPA treble damages. Key state for TxBD vault."
+    },
+    "CO": {
+      "twoPartyConsent": false,
+      "aiDisclosureRequired": true,
+      "aiActEffective": "2026-06-30",
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Colorado AI Act effective June 30 2026. High-risk AI consumer opt-out rights."
+    },
+    "UT": {
+      "twoPartyConsent": false,
+      "aiDisclosureRequired": true,
+      "generativeAIDisclosure": true,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Utah requires generative AI disclosure specifically."
+    },
+    "VA": {
+      "twoPartyConsent": false,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "sb1339": true,
+      "optOutRetentionYears": 10,
+      "notes": "Virginia SB 1339 (Jan 2026): 10-year opt-out retention requirement."
+    },
+    "FL": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 20 },
+      "stateDNC": true,
+      "notes": "Florida. Two-party consent. Stricter call hours (8AM-8PM)."
+    },
+    "IL": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "bipa": true,
+      "notes": "Illinois. Two-party consent. BIPA may apply to voice biometrics."
+    },
+    "MA": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Massachusetts. Two-party consent. Key market for Daily Stop cross-sell."
+    },
+    "MD": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Maryland. Two-party consent."
+    },
+    "MI": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 9, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Michigan. Two-party consent. Stricter start hour (9AM)."
+    },
+    "MT": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": false,
+      "notes": "Montana. Two-party consent. No state DNC registry."
+    },
+    "NH": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "New Hampshire. Two-party consent."
+    },
+    "PA": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Pennsylvania. Two-party consent."
+    },
+    "WA": {
+      "twoPartyConsent": true,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Washington. Two-party consent."
+    },
+    "NY": {
+      "twoPartyConsent": false,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "New York. One-party consent. Important financial market."
+    },
+    "RI": {
+      "twoPartyConsent": false,
+      "aiDisclosureRequired": false,
+      "callHours": { "earliest": 8, "latest": 21 },
+      "stateDNC": true,
+      "notes": "Rhode Island. One-party consent. Daily Stop cross-sell territory."
+    }
+  },
+  "defaults": {
+    "twoPartyConsent": false,
+    "aiDisclosureRequired": false,
+    "callHours": { "earliest": 8, "latest": 21 },
+    "stateDNC": false,
+    "notes": "Federal baseline for states not explicitly configured."
+  }
+}
