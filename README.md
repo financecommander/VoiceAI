@@ -83,22 +83,56 @@ AI Voice Agent for the Calculus financial ecosystem: DMC, Constitutional Tender,
 src/
 ├── index.ts                      # Exports
 ├── types.ts                      # Core types, auth tiers, canonical data objects
+├── auth/
+│   ├── index.ts                  # Auth module exports
+│   └── service.ts                # AuthService — OTP, device binding, tier upgrade
 ├── compliance/
 │   └── enforcer.ts               # ComplianceEnforcer (10-gate pipeline)
+├── config/
+│   ├── env-validation.ts         # Environment variable validation with Zod
+│   └── state_rules.json          # State-specific compliance rules
+├── db/
+│   ├── client.ts                 # Drizzle + pg connection
+│   ├── index.ts                  # DB module exports
+│   └── schema.ts                 # Sessions, audit events, consent records schema
+├── flows/
+│   ├── base-flow.ts              # Abstract BaseFlow class
+│   ├── ct-flow.ts                # Constitutional Tender flow (metals)
+│   ├── dmc-flow.ts               # DMC flow (deposits, transfers, bill pay)
+│   ├── eureka-loan-ifse-flows.ts # Eureka settlement, TILT loan, IFSE treasury flows
+│   ├── index.ts                  # Flow module exports
+│   ├── mortgage-flow.ts          # Mortgage flow
+│   ├── real-estate-flow.ts       # Real estate flow
+│   ├── tilt-flow.ts              # TILT lending flow
+│   └── types.ts                  # Flow-specific types
+├── gateway/
+│   ├── cartesia-client.ts        # Cartesia TTS WebSocket client
+│   ├── deepgram-client.ts        # Deepgram STT WebSocket client
+│   ├── grok-adapter.ts           # Grok Voice Agent API WebSocket client
+│   ├── pipeline-controller.ts    # Pipeline switching (modular ↔ Grok)
+│   ├── server.ts                 # Express/WebSocket server entry point
+│   └── twilio-stream.ts          # Twilio Media Stream handler
+├── llm/
+│   ├── index.ts                  # LLM module exports
+│   ├── provider.ts               # LLMService — GPT-4o / Claude provider abstraction
+│   └── tool-executor.ts          # ToolExecutor — function calling + schema builder
 ├── orchestrator/
 │   └── orchestrator.ts           # State machine + Orchestra DSL routing
-├── gateway/
-│   ├── grok-adapter.ts           # Grok Voice Agent API WebSocket client
-│   └── pipeline-controller.ts    # Pipeline switching (modular ↔ Grok)
-├── services/
-│   └── contracts.ts              # API interfaces for all microservices
-├── config/
-│   └── state_rules.json          # State-specific compliance rules
-└── prompts/                      # (See Voice_Agent_Prompt_Templates_All_Models.md)
+└── services/
+    ├── audit-service.ts          # AuditServiceImpl — event bus writes
+    ├── consent-service.ts        # ConsentServiceImpl — TCPA consent management
+    ├── contracts.ts              # API interfaces for all microservices
+    ├── session-service.ts        # SessionService — call session lifecycle
+    └── crm/
+        ├── ghl-service.ts        # GoHighLevel CRM integration
+        ├── hubspot-service.ts    # HubSpot CRM integration
+        ├── index.ts              # CRM module exports
+        └── unified-adapter.ts    # UnifiedCRMAdapter — routes by CalcModel
 
 tests/
-├── routing.test.ts               # Orchestra DSL routing verification
-└── compliance.test.ts            # ComplianceEnforcer gate tests
+├── compliance.test.ts            # ComplianceEnforcer gate tests
+├── e2e.test.ts                   # End-to-end call flow tests
+└── routing.test.ts               # Orchestra DSL routing verification
 ```
 
 ## Key Design Decisions
@@ -119,6 +153,32 @@ cp .env.example .env
 npm install
 npm run build
 npm run dev
+```
+
+### Docker (recommended for local development)
+
+```bash
+# Start PostgreSQL + Redis + agent
+docker compose up -d
+
+# Start only infra (run agent locally)
+docker compose up -d postgres redis
+
+# Watch agent logs
+docker compose logs -f agent
+
+# Tear down and delete volumes
+docker compose down -v
+```
+
+The docker-compose stack runs PostgreSQL 15, Redis 7, and the voice agent on port 3000.  
+An optional Drizzle Studio UI (database browser) can be started with `--profile studio`.
+
+### Database migrations
+
+```bash
+npx drizzle-kit push   # Apply schema to the running database
+npx drizzle-kit studio # Open Drizzle Studio at http://localhost:4983
 ```
 
 ## Testing
