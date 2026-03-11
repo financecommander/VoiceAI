@@ -17,6 +17,8 @@ export type AgentModel =
   | 'LOAN_SERVICING'         // Post-close loan management (LoanPro)
   | 'IFSE'                   // Treasury operations
   | 'JACK'                   // Calculus team task dispatcher (email, SWARM, status)
+  | 'BUNNY'                  // Swarm supervisor, executive control, governance
+  | 'JENNY'                  // Personal/family assistant, home automation, wellness
   ;
 
 export interface ConversationPhase {

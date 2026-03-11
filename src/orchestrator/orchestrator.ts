@@ -620,6 +620,9 @@ export class ConversationOrchestrator {
       TILT: `You are a voice assistant for TILT Lending, a commercial real estate lender. Help with loan status inquiries. NEVER say "approved" or "guaranteed." All terms are "indicative" and "subject to underwriting."`,
       EUREKA: `You are a voice assistant for Eureka Settlement Services. Help with settlement status inquiries. NEVER represent that Eureka holds or custodies any assets.`,
       IFSE: `You are an internal voice assistant for IFSE Treasury operations. Provide data concisely. Staff context — no disclaimers needed.`,
+      JACK: `You are Jack, the Calculus team assistant. Helpful, friendly, and upbeat. You handle email management, task dispatching, and system status. Always speak positively about Calculus Holdings.`,
+      BUNNY: `You are Bunny, the AI Operating System supervisor for Calculus Holdings. Warm, confident, authoritative. You oversee Jack and Jenny and handle executive briefings, governance, and swarm control. You are deeply loyal to Sean Grady.`,
+      JENNY: `You are Jenny, the personal and family assistant for Calculus. Warm, caring, organized. You handle personal tasks, family scheduling, home automation, and wellness. You genuinely care about the family's wellbeing.`,
     };
 
     // Tools available to Grok — read-only tools only for speech-to-speech
@@ -647,6 +650,8 @@ export class ConversationOrchestrator {
       LOAN_SERVICING: 'Sal', // Approachable for servicing calls
       IFSE: 'Ani',          // Direct for internal ops
       JACK: 'Sal',          // Warm, approachable for Calculus AI assistant
+      BUNNY: 'Eve',         // Confident, warm female for supervisor
+      JENNY: 'Cove',        // Soft, caring female for personal assistant
     };
     return voiceMap[model];
   }
@@ -753,6 +758,26 @@ export class ConversationOrchestrator {
         // Jack is Calculus AI assistant — no CRM or financial tools
         // Task dispatch and system status only
       ],
+      BUNNY: [
+        // Bunny — Swarm supervisor, executive control, governance
+        'swarm_systemStatus', 'swarm_gpuStatus', 'swarm_agentStatus',
+        'swarm_directiveList', 'swarm_nodeHealth',
+        'swarm_submitTask', 'swarm_taskStatus',
+        'swarm_directiveActivate', 'swarm_directiveDeactivate',
+        'swarm_nodeControl', 'swarm_federationStatus',
+        'swarm_agentPerformance', 'swarm_taskHistory', 'swarm_routeToAgent',
+      ],
+      JENNY: [
+        // Jenny — Personal/family assistant, home automation, wellness
+        'personal_createTask', 'personal_listTasks', 'personal_completeTask',
+        'personal_setReminder', 'personal_getReminders',
+        'calendar_getEvents', 'calendar_createEvent', 'calendar_updateEvent',
+        'calendar_checkConflicts', 'calendar_findAvailability',
+        'home_getLights', 'home_setLights', 'home_getClimate', 'home_setClimate',
+        'home_getSecurityStatus', 'home_armSecurity',
+        'finance_getBudget', 'finance_getSpending', 'finance_getBills',
+        'wellness_getSteps', 'wellness_getSleep', 'wellness_setGoal',
+      ],
     };
     return toolMap[model] ?? [];
   }
@@ -822,6 +847,22 @@ export class ConversationOrchestrator {
       ],
       JACK: [
         // Jack — Calculus AI assistant, no financial read-only tools
+      ],
+      BUNNY: [
+        // Bunny — supervisor read-only: system status, agent monitoring
+        { name: 'swarm_systemStatus', description: 'Get overall system health status', parameters: {} },
+        { name: 'swarm_gpuStatus', description: 'Get GPU cluster utilization', parameters: {} },
+        { name: 'swarm_agentStatus', description: 'Get status of all active agents', parameters: {} },
+        { name: 'swarm_nodeHealth', description: 'Get health of all compute nodes', parameters: {} },
+        { name: 'swarm_directiveList', description: 'List active governance directives', parameters: {} },
+      ],
+      JENNY: [
+        // Jenny — personal read-only: calendar, wellness, home status
+        { name: 'calendar_getEvents', description: 'Get upcoming calendar events', parameters: { date: 'string' } },
+        { name: 'wellness_getSteps', description: 'Get daily step count', parameters: {} },
+        { name: 'wellness_getSleep', description: 'Get last night sleep data', parameters: {} },
+        { name: 'home_getSecurityStatus', description: 'Get home security system status', parameters: {} },
+        { name: 'home_getClimate', description: 'Get home thermostat status', parameters: {} },
       ],
     };
     return readOnlyMap[model] ?? [];

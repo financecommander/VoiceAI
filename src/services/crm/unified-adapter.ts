@@ -64,7 +64,9 @@ export const DEFAULT_CRM_ROUTING: UnifiedCRMConfig = {
     EUREKA: 'ghl',
     LOAN_SERVICING: 'hubspot',
     IFSE: 'hubspot',
-    JACK: 'hubspot',
+    JACK: 'hubspot',       // Enterprise/work contacts
+    BUNNY: 'hubspot',      // Executive/supervisory (Sean's direct channel)
+    JENNY: 'hubspot',      // Personal/family contacts
   },
   ghlLocations: {},
 };

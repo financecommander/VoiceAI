@@ -34,6 +34,8 @@ export enum CalcModel {
   LOAN_SERVICING = 'LOAN_SERVICING',
   IFSE = 'IFSE',
   JACK = 'JACK',
+  BUNNY = 'BUNNY',
+  JENNY = 'JENNY',
 }
 
 // ============================================================================
@@ -105,6 +107,20 @@ export enum Intent {
   TASK_STATUS = 'task_status',
   SYSTEM_STATUS = 'system_status',
 
+  // Bunny (swarm supervisor / executive control)
+  SWARM_CONTROL = 'swarm_control',
+  DIRECTIVE_QUERY = 'directive_query',
+  AGENT_OVERSIGHT = 'agent_oversight',
+  EXECUTIVE_BRIEFING = 'executive_briefing',
+  GOVERNANCE_ACTION = 'governance_action',
+
+  // Jenny (personal / family assistant)
+  PERSONAL_TASK = 'personal_task',
+  FAMILY_SCHEDULE = 'family_schedule',
+  HOME_AUTOMATION = 'home_automation',
+  PERSONAL_FINANCE = 'personal_finance',
+  WELLNESS_CHECK = 'wellness_check',
+
   // Universal
   HUMAN_HANDOFF = 'human_handoff',
   OPT_OUT = 'opt_out',
@@ -156,6 +172,20 @@ export const INTENT_AUTH_REQUIREMENTS: Record<Intent, AuthTier> = {
   [Intent.TASK_DISPATCH]: AuthTier.VERIFIED,
   [Intent.TASK_STATUS]: AuthTier.VERIFIED,
   [Intent.SYSTEM_STATUS]: AuthTier.ANONYMOUS,
+
+  // Bunny
+  [Intent.SWARM_CONTROL]: AuthTier.STRONG,
+  [Intent.DIRECTIVE_QUERY]: AuthTier.VERIFIED,
+  [Intent.AGENT_OVERSIGHT]: AuthTier.STRONG,
+  [Intent.EXECUTIVE_BRIEFING]: AuthTier.VERIFIED,
+  [Intent.GOVERNANCE_ACTION]: AuthTier.HIGH_RISK,
+
+  // Jenny
+  [Intent.PERSONAL_TASK]: AuthTier.VERIFIED,
+  [Intent.FAMILY_SCHEDULE]: AuthTier.VERIFIED,
+  [Intent.HOME_AUTOMATION]: AuthTier.VERIFIED,
+  [Intent.PERSONAL_FINANCE]: AuthTier.STRONG,
+  [Intent.WELLNESS_CHECK]: AuthTier.ANONYMOUS,
 
   // Universal
   [Intent.HUMAN_HANDOFF]: AuthTier.ANONYMOUS,

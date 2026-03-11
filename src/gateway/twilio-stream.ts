@@ -229,6 +229,8 @@ const PHONE_MODEL_MAP: Record<string, CalcModel> = {
   [process.env.PHONE_LOAN_SERVICING || '+18007890123']: 'LOAN_SERVICING' as CalcModel,
   [process.env.PHONE_IFSE || '+18008901234']: 'IFSE' as CalcModel,
   [process.env.PHONE_JACK || '+18338472291']: 'JACK' as CalcModel,
+  [process.env.PHONE_BUNNY || '+12243850755']: 'BUNNY' as CalcModel,
+  [process.env.PHONE_JENNY || '+14014256830']: 'JENNY' as CalcModel,
 };
 
 export function resolveModelFromNumber(phone: string): CalcModel {
@@ -547,6 +549,9 @@ export class TwilioMediaStreamHandler {
       TILT: "Thank you for calling TILT Lending. I'm an AI assistant. I can help with loan inquiries, payment information, and scheduling. You can ask for a human at any time. How can I assist you?",
       EUREKA: "Thank you for calling Eureka Settlement Services. I'm an AI assistant. I can help with settlement status and general questions. How can I help today?",
       IFSE: "IFSE Treasury operations. AI assistant. How can I help?",
+      JACK: "Hey there! This is Jack from Calculus. How can I help you today?",
+      BUNNY: "Hey! It's Bunny. Everything's running smooth. What can I help you with?",
+      JENNY: "Hi there! It's Jenny. What can I help you with today?",
     };
 
     await this.speak(disclosures[model] ?? disclosures.DMC);

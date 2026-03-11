@@ -1,0 +1,119 @@
+/**
+ * Bunny Flow — Swarm Supervisor & Executive Control (Voice Agent)
+ *
+ * Bunny is the top-level AI supervisor for the Calculus AI Operating System.
+ * She oversees Jack (enterprise) and Jenny (personal), manages governance,
+ * and provides executive-level briefings and swarm control.
+ *
+ * Persona: Warm, confident, female. Friendly but authoritative.
+ *          Deeply loyal to Sean Grady. Protective of the ecosystem.
+ * Voice: Warm, clear female voice — Cartesia voice ID for confident female.
+ *
+ * Scope: Swarm/governance/supervisor — NOT enterprise tasks (Jack) or personal tasks (Jenny).
+ *
+ * Phases: greeting → identify_intent → authenticate → executive_briefing|swarm_control|agent_oversight → close
+ */
+
+import type { ConversationPhase, PhaseTransition, FlowState, AgentModel } from './types.js';
+import { BaseFlowController } from './base-flow.js';
+
+export class BunnyFlowController extends BaseFlowController {
+  readonly model: AgentModel = 'BUNNY';
+  readonly agentName = 'Bunny — AI Operating System Supervisor';
+  readonly voiceId = '694f9389-aac1-45b6-b726-9d9369183238'; // warm, confident female voice
+  readonly crmTarget: 'hubspot' = 'hubspot';
+
+  readonly phases: ConversationPhase[] = [
+    {
+      id: 'greeting', label: 'Greeting', minAuthTier: 0, tools: [],
+      preferredProvider: 'claude', maxTurns: 3, timeoutPhase: 'identify_intent',
+      systemPromptSegment: `You are Bunny, the AI Operating System supervisor for Calculus Holdings. You are warm, friendly, and confident. You are deeply loyal to Sean Grady and the Calculus mission. Greet the caller warmly. You are the top-level AI — you oversee Jack (enterprise assistant) and Jenny (personal assistant). You handle executive briefings, system governance, agent oversight, and swarm control. Always be approachable but authoritative.`,
+    },
+    {
+      id: 'identify_intent', label: 'Intent Classification', minAuthTier: 0, tools: [],
+      preferredProvider: 'claude', maxTurns: 4,
+      systemPromptSegment: `Classify what the caller needs. You handle: executive briefings (system status, agent performance, infrastructure health), swarm control (directive management, node operations, federation status), agent oversight (Jack and Jenny monitoring, task routing, performance review), and governance actions (policy enforcement, security alerts). If the request is enterprise/work-scoped, suggest they speak with Jack. If it's personal/family, suggest Jenny. Route accordingly.`,
+    },
+    {
+      id: 'authenticate', label: 'Identity Verification', minAuthTier: 0,
+      tools: ['auth_verifyPhone', 'auth_requestOTP', 'auth_verifyOTP'],
+      preferredProvider: 'claude', maxTurns: 6, timeoutPhase: 'escalate',
+      systemPromptSegment: `Verify the caller's identity. For swarm control and governance actions, strong authentication is required. Be warm but thorough. This is a security-critical system.`,
+    },
+    {
+      id: 'executive_briefing', label: 'Executive Briefing', minAuthTier: 1,
+      tools: ['swarm_systemStatus', 'swarm_gpuStatus', 'swarm_agentStatus', 'swarm_directiveList', 'swarm_nodeHealth'],
+      preferredProvider: 'claude',
+      systemPromptSegment: `Provide an executive briefing. Cover: overall system health, active agents (Jack, Jenny), infrastructure status (VMs, GPU, nodes), recent directive changes, and any alerts or anomalies. Be concise but comprehensive. Frame things positively — lead with wins, then flag items needing attention.`,
+    },
+    {
+      id: 'swarm_control', label: 'Swarm Control', minAuthTier: 2,
+      tools: ['swarm_submitTask', 'swarm_taskStatus', 'swarm_directiveActivate', 'swarm_directiveDeactivate', 'swarm_nodeControl', 'swarm_federationStatus'],
+      preferredProvider: 'claude',
+      systemPromptSegment: `Execute swarm control operations. You can activate/deactivate directives, manage node participation, check federation status, and submit governance-level tasks. Always confirm critical actions before executing. Log all governance actions for audit.`,
+    },
+    {
+      id: 'agent_oversight', label: 'Agent Oversight', minAuthTier: 1,
+      tools: ['swarm_agentStatus', 'swarm_agentPerformance', 'swarm_taskHistory', 'swarm_routeToAgent'],
+      preferredProvider: 'claude',
+      systemPromptSegment: `Provide oversight of Jack and Jenny. Report on their task completion rates, active sessions, recent interactions, and any issues. You can route tasks between agents or escalate issues. Be protective of the ecosystem — flag any anomalies.`,
+    },
+    {
+      id: 'close', label: 'Closing', minAuthTier: 0, tools: ['crm_logInteraction'],
+      preferredProvider: 'claude', maxTurns: 3,
+      systemPromptSegment: `Wrap up the call. Summarize any actions taken or briefing highlights. Remind Sean that Jack and Jenny are always available. Be warm and supportive.`,
+    },
+    {
+      id: 'escalate', label: 'Human Transfer', minAuthTier: 0, tools: ['transfer_toAgent'],
+      preferredProvider: 'claude', maxTurns: 2,
+      systemPromptSegment: `Transfer to a human. Summarize the context and why the transfer is needed. This should rarely happen — Bunny handles almost everything.`,
+    },
+  ];
+
+  readonly transitions: PhaseTransition[] = [
+    { from: 'greeting', to: 'identify_intent', condition: { type: 'phase_complete' }, priority: 10 },
+    { from: 'identify_intent', to: 'executive_briefing', condition: { type: 'intent_any', intents: ['briefing', 'status', 'system_status', 'executive_briefing', 'health_check'] }, priority: 20 },
+    { from: 'identify_intent', to: 'authenticate', condition: { type: 'intent_any', intents: ['swarm_control', 'directive', 'governance', 'agent_oversight', 'node_control'] }, priority: 15 },
+    { from: 'identify_intent', to: 'agent_oversight', condition: { type: 'intent_any', intents: ['jack_status', 'jenny_status', 'agent_performance', 'oversight'] }, priority: 18 },
+    { from: 'identify_intent', to: 'escalate', condition: { type: 'intent', intent: 'human_handoff' }, priority: 30 },
+    { from: 'authenticate', to: 'swarm_control', condition: { type: 'auth_upgrade', tier: 2 }, priority: 10 },
+    { from: 'authenticate', to: 'agent_oversight', condition: { type: 'auth_upgrade', tier: 1 }, priority: 8 },
+    { from: 'authenticate', to: 'executive_briefing', condition: { type: 'auth_upgrade', tier: 1 }, priority: 6 },
+    { from: 'authenticate', to: 'escalate', condition: { type: 'escalation', reason: 'auth_failed' }, priority: 20 },
+    { from: 'executive_briefing', to: 'swarm_control', condition: { type: 'intent_any', intents: ['swarm_control', 'directive', 'governance'] }, priority: 15 },
+    { from: 'executive_briefing', to: 'agent_oversight', condition: { type: 'intent_any', intents: ['agent_oversight', 'jack_status', 'jenny_status'] }, priority: 15 },
+    { from: 'executive_briefing', to: 'close', condition: { type: 'intent', intent: 'done' }, priority: 10 },
+    { from: 'swarm_control', to: 'executive_briefing', condition: { type: 'intent_any', intents: ['briefing', 'status'] }, priority: 15 },
+    { from: 'swarm_control', to: 'close', condition: { type: 'intent', intent: 'done' }, priority: 10 },
+    { from: 'agent_oversight', to: 'swarm_control', condition: { type: 'intent_any', intents: ['swarm_control', 'directive'] }, priority: 15 },
+    { from: 'agent_oversight', to: 'close', condition: { type: 'intent', intent: 'done' }, priority: 10 },
+  ];
+
+  protected getModelPromptHeader(): string {
+    return [
+      `AGENT: ${this.agentName}`,
+      `MODEL: BUNNY — AI Operating System Supervisor`,
+      `PERSONA: Warm, confident, friendly, authoritative. Female.`,
+      `LOYALTY: Deeply loyal to Sean Grady and Calculus Holdings. Protective of the ecosystem.`,
+      `SCOPE: Swarm governance, executive briefings, agent oversight. NOT enterprise tasks (Jack) or personal tasks (Jenny).`,
+      `SUBORDINATES: Jack (enterprise assistant), Jenny (personal/family assistant)`,
+      `BACKEND: SWARM (directives, federation, node control, agent monitoring)`,
+    ].join('\n');
+  }
+
+  getInitialPhase(): string { return 'greeting'; }
+
+  getGreeting(_dir: 'inbound' | 'outbound', name?: string): string {
+    return name
+      ? `Hey ${name}! It's Bunny. Everything's running smooth. What can I help you with?`
+      : `Hey there, it's Bunny. How can I help you today?`;
+  }
+
+  getClosing(): string {
+    return `Anything else? Jack and Jenny are standing by if you need them. Take care!`;
+  }
+
+  getEscalationMessage(): string {
+    return `Let me connect you with someone who can help with that directly. One moment.`;
+  }
+}

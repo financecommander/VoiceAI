@@ -18,6 +18,8 @@ export { MortgageFlowController } from './mortgage-flow.js';
 export { RealEstateFlowController } from './real-estate-flow.js';
 export { EurekaFlowController, LoanServicingFlowController, IFSEFlowController } from './eureka-loan-ifse-flows.js';
 export { JackFlowController } from './jack-flow.js';
+export { BunnyFlowController } from './bunny-flow.js';
+export { JennyFlowController } from './jenny-flow.js';
 
 import type { AgentModel, IFlowController } from './types.js';
 import { DMCFlowController } from './dmc-flow.js';
@@ -27,6 +29,8 @@ import { MortgageFlowController } from './mortgage-flow.js';
 import { RealEstateFlowController } from './real-estate-flow.js';
 import { EurekaFlowController, LoanServicingFlowController, IFSEFlowController } from './eureka-loan-ifse-flows.js';
 import { JackFlowController } from './jack-flow.js';
+import { BunnyFlowController } from './bunny-flow.js';
+import { JennyFlowController } from './jenny-flow.js';
 
 // Singleton instances
 const flows = new Map<AgentModel, IFlowController>();
@@ -43,6 +47,8 @@ function initFlows(): void {
     new LoanServicingFlowController(),
     new IFSEFlowController(),
     new JackFlowController(),
+    new BunnyFlowController(),
+    new JennyFlowController(),
   ];
   for (const c of controllers) {
     flows.set(c.model, c);
