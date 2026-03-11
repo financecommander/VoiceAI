@@ -228,6 +228,7 @@ const PHONE_MODEL_MAP: Record<string, CalcModel> = {
   [process.env.PHONE_EUREKA || '+18006789012']: 'EUREKA' as CalcModel,
   [process.env.PHONE_LOAN_SERVICING || '+18007890123']: 'LOAN_SERVICING' as CalcModel,
   [process.env.PHONE_IFSE || '+18008901234']: 'IFSE' as CalcModel,
+  [process.env.PHONE_JACK || '+18338472291']: 'JACK' as CalcModel,
 };
 
 export function resolveModelFromNumber(phone: string): CalcModel {

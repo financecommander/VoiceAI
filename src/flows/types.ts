@@ -16,6 +16,7 @@ export type AgentModel =
   | 'EUREKA'                 // Settlement services
   | 'LOAN_SERVICING'         // Post-close loan management (LoanPro)
   | 'IFSE'                   // Treasury operations
+  | 'JACK'                   // Calculus team task dispatcher (email, SWARM, status)
   ;
 
 export interface ConversationPhase {

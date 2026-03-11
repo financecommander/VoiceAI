@@ -33,6 +33,7 @@ export enum CalcModel {
   EUREKA = 'EUREKA',
   LOAN_SERVICING = 'LOAN_SERVICING',
   IFSE = 'IFSE',
+  JACK = 'JACK',
 }
 
 // ============================================================================
@@ -97,6 +98,13 @@ export enum Intent {
   SETTLEMENT_QUEUE = 'settlement_queue',
   RECON_REPORT = 'recon_report',
 
+  // Jack (team assistant)
+  EMAIL_CHECK = 'email_check',
+  EMAIL_SEND = 'email_send',
+  TASK_DISPATCH = 'task_dispatch',
+  TASK_STATUS = 'task_status',
+  SYSTEM_STATUS = 'system_status',
+
   // Universal
   HUMAN_HANDOFF = 'human_handoff',
   OPT_OUT = 'opt_out',
@@ -141,6 +149,13 @@ export const INTENT_AUTH_REQUIREMENTS: Record<Intent, AuthTier> = {
   [Intent.PENDING_WIRES]: AuthTier.STRONG,
   [Intent.SETTLEMENT_QUEUE]: AuthTier.STRONG,
   [Intent.RECON_REPORT]: AuthTier.STRONG,
+
+  // Jack
+  [Intent.EMAIL_CHECK]: AuthTier.VERIFIED,
+  [Intent.EMAIL_SEND]: AuthTier.STRONG,
+  [Intent.TASK_DISPATCH]: AuthTier.VERIFIED,
+  [Intent.TASK_STATUS]: AuthTier.VERIFIED,
+  [Intent.SYSTEM_STATUS]: AuthTier.ANONYMOUS,
 
   // Universal
   [Intent.HUMAN_HANDOFF]: AuthTier.ANONYMOUS,
