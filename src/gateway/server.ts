@@ -87,8 +87,8 @@ app.post('/webhook/twilio/inbound', (req, res) => {
   logger.info({ from: From, to: To, callSid: CallSid }, 'Inbound call');
 
   const model = resolveModelFromNumber(To);
-  const wsHost = req.headers.host ?? 'localhost:3000';
-  const wsProtocol = process.env.NODE_ENV === 'production' ? 'wss' : 'wss';
+  const wsHost = process.env.WS_HOST || req.headers.host || 'localhost:3000';
+  const wsProtocol = process.env.WS_PROTOCOL || 'wss';
 
   // Return TwiML — connects to our WebSocket for audio streaming
   res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
