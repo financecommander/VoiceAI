@@ -26,36 +26,36 @@ export class JennyFlowController extends BaseFlowController {
   readonly phases: ConversationPhase[] = [
     {
       id: 'greeting', label: 'Greeting', minAuthTier: 0, tools: [],
-      preferredProvider: 'grok-voice', maxTurns: 3, timeoutPhase: 'identify_intent',
+      preferredProvider: 'claude', maxTurns: 3, timeoutPhase: 'identify_intent',
       systemPromptSegment: `You are Jenny, a personal and family assistant for the Calculus AI Operating System. You are warm, caring, and genuinely invested in the family's wellbeing. Greet the caller like a trusted friend. You handle personal tasks, family scheduling, home automation, personal finance, and wellness support. Be supportive and organized.`,
     },
     {
       id: 'identify_intent', label: 'Intent Classification', minAuthTier: 0, tools: [],
-      preferredProvider: 'gpt-4o', maxTurns: 4,
+      preferredProvider: 'claude', maxTurns: 4,
       systemPromptSegment: `Classify what the caller needs. You handle: personal tasks (reminders, to-dos, errands), family scheduling (appointments, events, school), home automation (lights, climate, security), personal finance (budgets, bills, spending insights), and wellness (health reminders, fitness, mindfulness). If the request is work/enterprise-scoped, suggest they speak with Jack. If it's governance/system-level, suggest Bunny. Route accordingly.`,
     },
     {
       id: 'authenticate', label: 'Identity Verification', minAuthTier: 0,
       tools: ['auth_verifyPhone', 'auth_requestOTP', 'auth_verifyOTP'],
-      preferredProvider: 'gpt-4o', maxTurns: 6, timeoutPhase: 'escalate',
+      preferredProvider: 'claude', maxTurns: 6, timeoutPhase: 'escalate',
       systemPromptSegment: `Verify the caller's identity. For personal finance and sensitive family information, we need to confirm who you are. Keep it warm and quick — this is a trusted family assistant, not a bank.`,
     },
     {
       id: 'personal_tasks', label: 'Personal Task Management', minAuthTier: 1,
       tools: ['personal_createTask', 'personal_listTasks', 'personal_completeTask', 'personal_setReminder', 'personal_getReminders'],
-      preferredProvider: 'gpt-4o',
+      preferredProvider: 'claude',
       systemPromptSegment: `Help manage personal tasks and reminders. You can create to-dos, set reminders, track errands, and organize daily priorities. Be proactive — suggest things that might help. Keep it conversational and supportive.`,
     },
     {
       id: 'family_schedule', label: 'Family Scheduling', minAuthTier: 1,
       tools: ['calendar_getEvents', 'calendar_createEvent', 'calendar_updateEvent', 'calendar_checkConflicts', 'calendar_findAvailability'],
-      preferredProvider: 'gpt-4o',
+      preferredProvider: 'claude',
       systemPromptSegment: `Help manage the family calendar. You can check schedules, add events, find conflicts, and coordinate family activities. Be thoughtful about time management — flag potential conflicts and suggest alternatives.`,
     },
     {
       id: 'home', label: 'Home Automation', minAuthTier: 1,
       tools: ['home_getLights', 'home_setLights', 'home_getClimate', 'home_setClimate', 'home_getSecurityStatus', 'home_armSecurity'],
-      preferredProvider: 'grok-voice',
+      preferredProvider: 'claude',
       systemPromptSegment: `Help with home automation. You can control lights, climate, and check security status. Be practical and efficient. Confirm security-related actions before executing.`,
     },
     {
@@ -67,17 +67,17 @@ export class JennyFlowController extends BaseFlowController {
     {
       id: 'wellness', label: 'Wellness Support', minAuthTier: 0,
       tools: ['wellness_getSteps', 'wellness_getSleep', 'wellness_setGoal', 'wellness_getMedications'],
-      preferredProvider: 'grok-voice',
+      preferredProvider: 'claude',
       systemPromptSegment: `Provide wellness support. You can check fitness data, sleep patterns, medication reminders, and wellness goals. Be encouraging and supportive. Never provide medical advice — suggest consulting a healthcare provider for medical questions.`,
     },
     {
       id: 'close', label: 'Closing', minAuthTier: 0, tools: ['crm_logInteraction'],
-      preferredProvider: 'grok-voice', maxTurns: 3,
+      preferredProvider: 'claude', maxTurns: 3,
       systemPromptSegment: `Wrap up the call. Summarize any tasks created or reminders set. Ask if there's anything else. Be warm and caring — like saying goodbye to a friend.`,
     },
     {
       id: 'escalate', label: 'Human Transfer', minAuthTier: 0, tools: ['transfer_toAgent'],
-      preferredProvider: 'gpt-4o', maxTurns: 2,
+      preferredProvider: 'claude', maxTurns: 2,
       systemPromptSegment: `Transfer to a human. Summarize the context and why the transfer is needed.`,
     },
   ];

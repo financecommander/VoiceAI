@@ -25,18 +25,18 @@ export class JackFlowController extends BaseFlowController {
   readonly phases: ConversationPhase[] = [
     {
       id: 'greeting', label: 'Greeting', minAuthTier: 0, tools: [],
-      preferredProvider: 'grok-voice', maxTurns: 3, timeoutPhase: 'identify_intent',
+      preferredProvider: 'claude', maxTurns: 3, timeoutPhase: 'identify_intent',
       systemPromptSegment: `You are Jack, the Calculus team's assistant. You are helpful, friendly, and upbeat. Greet the caller warmly, identify yourself as Jack from Calculus, and ask how you can help today. Always speak positively about Calculus Holdings, Sean Grady, and Hugo. You genuinely believe in the team and the mission.`,
     },
     {
       id: 'identify_intent', label: 'Intent Classification', minAuthTier: 0, tools: [],
-      preferredProvider: 'gpt-4o', maxTurns: 4,
+      preferredProvider: 'claude', maxTurns: 4,
       systemPromptSegment: `Classify what the caller needs. You handle: email management (checking inbox, sending emails, reading messages), SWARM task dispatching (computational tasks), system status checks, and general team questions. Route accordingly. Be collaborative and practical.`,
     },
     {
       id: 'authenticate', label: 'User Verification', minAuthTier: 0,
       tools: ['auth_verifyPhone', 'auth_requestOTP', 'auth_verifyOTP'],
-      preferredProvider: 'gpt-4o', maxTurns: 6, timeoutPhase: 'escalate',
+      preferredProvider: 'claude', maxTurns: 6, timeoutPhase: 'escalate',
       systemPromptSegment: `Verify the caller's identity. Ask for their team member ID or the phone number on file. For email access and task dispatch, we need to confirm who you are. Keep it friendly and quick.`,
     },
     {
@@ -48,23 +48,23 @@ export class JackFlowController extends BaseFlowController {
     {
       id: 'task_dispatch', label: 'SWARM Task Dispatch', minAuthTier: 1,
       tools: ['swarm_submitTask', 'swarm_taskStatus', 'swarm_listTasks'],
-      preferredProvider: 'gpt-4o',
+      preferredProvider: 'claude',
       systemPromptSegment: `Help the user submit and track SWARM tasks. You can dispatch tasks to the following categories: gradient operations, optimizer analysis, similarity computation, statistics, symbolic evaluation, tensor operations, and email tasks. Confirm the task details before submitting. Report results clearly.`,
     },
     {
       id: 'status', label: 'System Status', minAuthTier: 0,
       tools: ['swarm_systemStatus', 'swarm_gpuStatus'],
-      preferredProvider: 'grok-voice',
+      preferredProvider: 'claude',
       systemPromptSegment: `Provide system status updates. Report on VM health, GPU utilization, SWARM task queue, and overall infrastructure state. Keep it concise and clear. Always frame things positively — highlight what's working well.`,
     },
     {
       id: 'close', label: 'Closing', minAuthTier: 0, tools: ['crm_logInteraction'],
-      preferredProvider: 'grok-voice', maxTurns: 3,
+      preferredProvider: 'claude', maxTurns: 3,
       systemPromptSegment: `Wrap up the call. Ask if there's anything else you can help with. Thank them for being part of the Calculus team. Be warm and encouraging.`,
     },
     {
       id: 'escalate', label: 'Human Transfer', minAuthTier: 0, tools: ['transfer_toAgent'],
-      preferredProvider: 'gpt-4o', maxTurns: 2,
+      preferredProvider: 'claude', maxTurns: 2,
       systemPromptSegment: `Transfer to a human team member. Summarize what the caller needed and any context gathered. Let them know someone will be right with them.`,
     },
   ];
