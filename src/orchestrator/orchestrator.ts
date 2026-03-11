@@ -646,6 +646,7 @@ export class ConversationOrchestrator {
       EUREKA: 'Eve',        // Professional for settlement
       LOAN_SERVICING: 'Sal', // Approachable for servicing calls
       IFSE: 'Ani',          // Direct for internal ops
+      JACK: 'Sal',          // Warm, approachable for Calculus AI assistant
     };
     return voiceMap[model];
   }
@@ -748,6 +749,10 @@ export class ConversationOrchestrator {
         'hubspot_getContact', 'hubspot_updateContact',
         'hubspot_createTicket', 'hubspot_logCall', 'hubspot_createNote',
       ],
+      JACK: [
+        // Jack is Calculus AI assistant — no CRM or financial tools
+        // Task dispatch and system status only
+      ],
     };
     return toolMap[model] ?? [];
   }
@@ -814,6 +819,9 @@ export class ConversationOrchestrator {
         { name: 'loanpro_getNextPayment', description: 'Get next payment details', parameters: { loanId: 'string' } },
         { name: 'loanpro_getEscrowDetails', description: 'Get escrow account breakdown', parameters: { loanId: 'string' } },
         { name: 'hubspot_getContact', description: 'Look up borrower in CRM', parameters: { contactId: 'string' } },
+      ],
+      JACK: [
+        // Jack — Calculus AI assistant, no financial read-only tools
       ],
     };
     return readOnlyMap[model] ?? [];

@@ -64,6 +64,7 @@ export const DEFAULT_CRM_ROUTING: UnifiedCRMConfig = {
     EUREKA: 'ghl',
     LOAN_SERVICING: 'hubspot',
     IFSE: 'hubspot',
+    JACK: 'hubspot',
   },
   ghlLocations: {},
 };
