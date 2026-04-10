@@ -33,9 +33,12 @@ export interface SwarmNode {
 }
 
 export const SWARM_NODES: SwarmNode[] = [
-  { name: 'swarm-mainframe', externalIp: '34.148.140.31',  role: 'orchestration' },
-  { name: 'swarm-gpu',       externalIp: '35.227.111.161', role: 'inference' },
-  { name: 'fc-ai-portal',    externalIp: '34.139.78.75',   role: 'api-hub' },
+  { name: 'swarm-mainframe',  externalIp: '34.148.140.31',  role: 'orchestration' },
+  { name: 'swarm-gpu',        externalIp: '35.227.111.161', role: 'inference' },
+  { name: 'fc-ai-portal',     externalIp: '34.139.78.75',   role: 'api-hub' },
+  { name: 'sw-gpu-voice-01',  externalIp: '',                role: 'voice' },
+  { name: 'sw-gpu-voice-02',  externalIp: '',                role: 'voice' },
+  { name: 'portal-ai-01',     externalIp: '34.139.78.75',   role: 'api-hub' },
 ];
 
 const ALLOWED_NODE_NAMES = new Set(SWARM_NODES.map(n => n.name));
