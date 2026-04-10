@@ -40,6 +40,8 @@ import {
   personaRegistry, convStateEngine, turnTakingManager, callOutcomeLogger,
   type VoicePersona, type ConvPhase,
 } from '../voice/voice-intelligence.js';
+import { ConversationalNaturalnessEngine } from './naturalness-engine.js';
+import { getOpenClawClient } from '../services/openclaw-client.js';
 
 // ============================================================================
 // Twilio Message Types
@@ -124,8 +126,18 @@ const MULAW_TO_PCM = new Int16Array(256);
   }
 })();
 
+// Pre-allocated buffer pool to avoid GC pressure from 480+ allocs/sec.
+// Twilio sends 160-byte mulaw chunks → 320-byte PCM16 → 640-byte PCM16 16kHz.
+// Reuse buffers instead of allocating new ones every 20ms.
+const PCM_POOL_8K = Buffer.allocUnsafe(2048);  // fits 160-sample mulaw → 320-byte PCM
+const PCM_POOL_16K = Buffer.allocUnsafe(4096); // fits 320-sample upsampled → 640-byte PCM
+
 function mulawToPCM16(mulawBuffer: Buffer): Buffer {
-  const pcm = Buffer.alloc(mulawBuffer.length * 2);
+  // Use pool if chunk fits, otherwise allocate (rare for telephony chunks)
+  const needed = mulawBuffer.length * 2;
+  const pcm = needed <= PCM_POOL_8K.length
+    ? PCM_POOL_8K.subarray(0, needed)
+    : Buffer.allocUnsafe(needed);
   for (let i = 0; i < mulawBuffer.length; i++) {
     const sample = MULAW_TO_PCM[mulawBuffer[i]];
     pcm.writeInt16LE(sample, i * 2);
@@ -165,7 +177,10 @@ function pcm16ToMulaw(pcmBuffer: Buffer): Buffer {
  */
 function upsample8to16(pcm8k: Buffer): Buffer {
   const samples8k = pcm8k.length / 2;
-  const pcm16k = Buffer.alloc(samples8k * 4); // 2x samples, 2 bytes each
+  const needed = samples8k * 4;
+  const pcm16k = needed <= PCM_POOL_16K.length
+    ? PCM_POOL_16K.subarray(0, needed)
+    : Buffer.allocUnsafe(needed);
 
   for (let i = 0; i < samples8k - 1; i++) {
     const s1 = pcm8k.readInt16LE(i * 2);
@@ -296,6 +311,30 @@ export function resolveModelFromNumber(phone: string): CalcModel {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Derive a continuous 0.0–1.0 quality score from a ComplianceScorecard.
+ * Used as actual_quality_score (quality_score_source = 'auto_eval') for
+ * adaptive_provider_router training labels.
+ * 8 binary gates; each contributes 1/8 to the score.
+ */
+function _complianceScore(sc: import('../compliance/enforcer.js').ComplianceScorecard): number {
+  const gates = [
+    sc.disclosureDelivered,
+    sc.callWithinPermittedHours,
+    sc.consentWasValidAtDial,
+    sc.dncWasClearAtDial,
+    sc.callerIdWasValid,
+    sc.piiRedactionApplied,
+    sc.optOutRequestsHonored,
+    sc.investmentAdviceBlocked === 0,
+  ];
+  return gates.filter(Boolean).length / gates.length;
+}
+
+// ============================================================================
 // Twilio WebSocket Handler
 // ============================================================================
 
@@ -338,6 +377,17 @@ export class TwilioMediaStreamHandler {
   private sentimentScore: number = 0;
   private consecutiveNegative: number = 0;
 
+  // Conversational naturalness (fillers, back-channels, latency masks)
+  private naturalness = new ConversationalNaturalnessEngine();
+
+  // Deepgram options — stored so endpointing can be updated mid-call on intent change
+  private deepgramOptions: import('./deepgram-client.js').DeepgramStreamOptions | null = null;
+  private static readonly TRANSACTIONAL_INTENTS = new Set([
+    'transfer_request', 'order_execution', 'payment_inquiry', 'payment_status',
+    'payoff_quote', 'escrow_inquiry', 'dscr_calculation', 'fx_exposure',
+    'sanctions_check', 'wire', 'loan_inquiry',
+  ]);
+
   // Call state machine (VOICE-CALL-01)
   private callState: CallState = 'idle';
 
@@ -345,6 +395,8 @@ export class TwilioMediaStreamHandler {
   private persona: VoicePersona | null = null;
   private silenceTimer: NodeJS.Timeout | null = null;
   private static readonly SILENCE_TIMEOUT_MS = 6000;
+
+  private onQualityScore?: (conversationId: string, score: number) => Promise<void>;
 
   constructor(params: {
     ws: WebSocket;
@@ -355,6 +407,7 @@ export class TwilioMediaStreamHandler {
     toolExecutor: ToolExecutor;
     conversationMemory: ConversationMemoryService;
     logger: Logger;
+    onQualityScore?: (conversationId: string, score: number) => Promise<void>;
   }) {
     this.ws = params.ws;
     this.pipelineController = params.pipelineController;
@@ -363,6 +416,7 @@ export class TwilioMediaStreamHandler {
     this.llm = params.llm;
     this.toolExecutor = params.toolExecutor;
     this.conversationMemory = params.conversationMemory;
+    this.onQualityScore = params.onQualityScore;
     this.logger = params.logger.child({ component: 'TwilioMediaStream' });
 
     this.setupWebSocketHandlers();
@@ -485,6 +539,11 @@ export class TwilioMediaStreamHandler {
     this.callStartTime = new Date();
     this.callState = 'listening';
 
+    // Reset naturalness engine for this call
+    const _agentDisplayNames: Record<string, string> = { JACK: 'Jack', JENNY: 'Jenny', BUNNY: 'Bunny', CINDY: 'Cindy' };
+    this.naturalness.setAgentName(_agentDisplayNames[model as string] ?? String(model));
+    this.naturalness.reset();
+
     // Load persona and initialize conversational state
     this.persona = personaRegistry.getByAgent(model as string) ?? personaRegistry.getByAgent('JACK');
     const convId = this.callSid ?? 'unknown';
@@ -508,22 +567,28 @@ export class TwilioMediaStreamHandler {
       }
     }
 
+    // Determine language detection based on caller's country code
+    const _callerPhone = this.sessionConfig.callerPhone;
+    const isUSNumber = /^\+1[2-9]\d{9}$/.test(_callerPhone);
+    const detectLanguage = !isUSNumber;
+
     // Start Deepgram + Cartesia in parallel to reduce call answer latency
+    this.deepgramOptions = {
+      encoding: 'linear16',
+      sampleRate: 16000,
+      channels: 1,
+      model: 'nova-3',
+      language: isUSNumber ? 'en' : undefined as any,
+      detectLanguage,
+      smartFormat: true,
+      punctuate: false,
+      interimResults: true,
+      endpointing: 300,
+      utteranceEndMs: 500,
+      vadEvents: true,
+    };
     await Promise.all([
-      this.deepgram.startStream({
-        encoding: 'linear16',
-        sampleRate: 16000,
-        channels: 1,
-        model: 'nova-2',
-        language: 'en',
-        detectLanguage: false,
-        smartFormat: true,
-        punctuate: false,
-        interimResults: true,
-        endpointing: 600,
-        utteranceEndMs: 700,
-        vadEvents: true,
-      }),
+      this.deepgram.startStream(this.deepgramOptions),
       this.cartesia.connect(),
     ]);
 
@@ -626,14 +691,18 @@ export class TwilioMediaStreamHandler {
   // ==========================================================================
 
   private setupDeepgramHandlers(): void {
-    this.deepgram.on('transcript', async (transcript: string, isFinal: boolean) => {
+    this.deepgram.on('transcript', async (transcript: string, isFinal: boolean, _speechFinal: boolean, _lang: string, confidence: number) => {
       this.logger.info({ transcript: transcript.substring(0, 60), isFinal }, 'Deepgram transcript event');
       if (!isFinal) return; // Only process final transcripts
       if (!transcript.trim()) return;
 
-      this.logger.info({ transcript }, 'Caller said');
+      this.logger.info({ transcript, confidence: confidence.toFixed(2) }, 'Caller said');
       this.callState = 'listening';
       this.resetSilenceTimer();
+
+      // Record turn + analyze for naturalness engine
+      this.naturalness.recordTurn('caller', transcript);
+      const analysis = this.naturalness.analyzeTurn(transcript);
 
       // Fast-path: repeated name invocation (VOICE-CALL-01 sec 4)
       const fastPathResponse = checkFastPath(transcript);
@@ -642,6 +711,36 @@ export class TwilioMediaStreamHandler {
         this.callState = 'speaking';
         await this.speak(fastPathResponse);
         return;
+      }
+
+      // Confidence-based re-ask (P6): low confidence = likely misheard
+      if (confidence < 0.75 && transcript.split(' ').length > 2) {
+        this.logger.warn({
+          phone: this.sessionConfig?.callerPhone,
+          agent: this.sessionConfig?.model,
+          confidence: parseFloat(confidence.toFixed(3)),
+          transcript: transcript.substring(0, 80),
+          language: this.detectedLanguage,
+          turnNumber: this.topicsDiscussed.length,
+        }, 'low_confidence_reask');
+        const reasks = [
+          "Sorry, I didn't catch that — could you say that again?",
+          "You broke up a bit — could you repeat that?",
+          "I missed that, sorry — one more time?",
+        ];
+        await this.speak(reasks[Math.floor(Math.random() * reasks.length)]);
+        return;
+      }
+
+      // Pre-response filler (P4): fire at most ONE of backchannel or latency mask to avoid
+      // audio collision. Latency mask takes priority (more informative). Neither fires if the
+      // other would — they share the same audio slot before the main LLM response arrives.
+      const backchannel = this.naturalness.getBackchannel();
+      const latencyMask = this.naturalness.getLatencyMask(analysis);
+      const filler = latencyMask ?? backchannel;
+      if (filler) {
+        this.isSpeaking = true;
+        this.cartesia.synthesize(filler).catch(() => {});
       }
 
       // Sentiment check — auto-escalate on frustration
@@ -664,6 +763,21 @@ export class TwilioMediaStreamHandler {
       // Track topics for memory persistence
       if (result.intent && !this.topicsDiscussed.includes(result.intent)) {
         this.topicsDiscussed.push(result.intent);
+      }
+
+      // Intent-aware endpointing: transactional intents (account numbers, amounts) need
+      // more silence to avoid cutting off callers mid-number. Restart Deepgram if needed.
+      if (this.deepgramOptions && result.intent) {
+        const isTransactional = TwilioMediaStreamHandler.TRANSACTIONAL_INTENTS.has(result.intent);
+        const targetEndpointing = isTransactional ? 500 : 300;
+        const targetUtteranceEndMs = isTransactional ? 700 : 500;
+        if (this.deepgramOptions.endpointing !== targetEndpointing) {
+          this.deepgramOptions = { ...this.deepgramOptions, endpointing: targetEndpointing, utteranceEndMs: targetUtteranceEndMs };
+          this.logger.info({ intent: result.intent, endpointing: targetEndpointing }, 'Updating Deepgram endpointing for intent');
+          this.deepgram.stopStream()
+            .then(() => this.deepgram.startStream(this.deepgramOptions!))
+            .catch((err: Error) => this.logger.warn({ error: err.message }, 'Endpointing update failed'));
+        }
       }
 
       // Voice intelligence: increment turn, track goals/objections
@@ -849,11 +963,12 @@ export class TwilioMediaStreamHandler {
 
   private setupCartesiaHandlers(): void {
     this.logger.info('Setting up Cartesia audio handlers');
-    this.cartesia.on('audio', (pcm8k: Buffer) => {
-      // Cartesia outputs 8kHz PCM directly (matching Twilio's native rate)
-      // Just encode to mulaw — no downsampling needed
-      const mulaw = pcm16ToMulaw(pcm8k);
-      this.sendAudioToTwilio(mulaw);
+    this.cartesia.on('audio', (audioData: Buffer) => {
+      // Cartesia is configured with encoding: 'pcm_mulaw' at 8kHz.
+      // When pcm_mulaw is set, Cartesia outputs RAW MULAW BYTES — NOT PCM16.
+      // Send directly to Twilio with zero conversion. The old code incorrectly
+      // ran pcm16ToMulaw() on already-mulaw data, causing severe distortion.
+      this.sendAudioToTwilio(audioData);
     });
 
     this.cartesia.on('done', () => {
@@ -906,9 +1021,28 @@ export class TwilioMediaStreamHandler {
   // Twilio Audio Output
   // ==========================================================================
 
+  /** Max WebSocket send buffer before dropping audio frames (64KB ≈ 4s of mulaw 8kHz) */
+  private static readonly WS_BACKPRESSURE_LIMIT = 64 * 1024;
+  private backpressureDrops = 0;
+
   private sendAudioToTwilio(mulawAudio: Buffer): void {
     if (!this.isStreaming || !this.streamSid) {
       this.logger.debug({ isStreaming: this.isStreaming, hasStreamSid: !!this.streamSid, audioLen: mulawAudio.length }, 'Dropping audio — stream not ready');
+      return;
+    }
+
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      this.logger.warn({ wsState: this.ws.readyState }, 'Cannot send audio — WebSocket not open');
+      return;
+    }
+
+    // Backpressure check: drop frames if send buffer is congested
+    // This prevents silent queueing that causes audio to arrive late in bursts
+    if (this.ws.bufferedAmount > TwilioMediaStreamHandler.WS_BACKPRESSURE_LIMIT) {
+      this.backpressureDrops++;
+      if (this.backpressureDrops % 50 === 1) {
+        this.logger.warn({ bufferedAmount: this.ws.bufferedAmount, drops: this.backpressureDrops }, 'Backpressure: dropping audio frame');
+      }
       return;
     }
 
@@ -920,14 +1054,10 @@ export class TwilioMediaStreamHandler {
       },
     });
 
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(message);
-      this.twilioAudioChunksSent += 1;
-      if (this.twilioAudioChunksSent % 50 === 1) {
-        this.logger.info({ twilioChunks: this.twilioAudioChunksSent, payloadLen: mulawAudio.length }, 'Sending audio to Twilio');
-      }
-    } else {
-      this.logger.warn({ wsState: this.ws.readyState }, 'Cannot send audio — WebSocket not open');
+    this.ws.send(message);
+    this.twilioAudioChunksSent += 1;
+    if (this.twilioAudioChunksSent % 50 === 1) {
+      this.logger.info({ twilioChunks: this.twilioAudioChunksSent, payloadLen: mulawAudio.length, buffered: this.ws.bufferedAmount }, 'Sending audio to Twilio');
     }
   }
 
@@ -1066,8 +1196,6 @@ export class TwilioMediaStreamHandler {
         streamSystemInstruction = JENNY_SYSTEM_PROMPT;
       } else if (agentModel === 'BUNNY') {
         streamSystemInstruction = buildAgentSystemPrompt('Bunny', 'operations assistant', 'Calculus Research');
-      } else if (agentModel === 'CINDY') {
-        streamSystemInstruction = CINDY_SYSTEM_PROMPT;
       } else {
         streamSystemInstruction = buildAgentSystemPrompt(String(agentModel), 'representative', 'Calculus');
       }
@@ -1075,11 +1203,12 @@ export class TwilioMediaStreamHandler {
     if (this.outboundMessage) {
       streamSystemInstruction += '\n\nOUTBOUND CALL CONTEXT: You called ' + (this.outboundRecipientName || 'a client') + '. Instructions: ' + this.outboundMessage;
     }
+    streamSystemInstruction += '\n\n' + this.naturalness.getNaturalnessInstructions();
 
-    // Pacing: apply persona-defined pause before responding (natural turn-taking feel)
-    if (this.persona && this.persona.pacingPauseMs > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, this.persona!.pacingPauseMs));
-    }
+    // Pacing pause removed — this was blocking the entire LLM+TTS pipeline with
+    // an arbitrary delay (up to 500ms), during which incoming audio wasn't processed.
+    // Natural pacing is better handled by Cartesia's prosody engine, or by the
+    // naturalness engine's backchannel/filler system which already runs above.
 
     // Log agent turn start for latency tracking
     turnTakingManager.logEvent(this.callSid ?? 'unknown', 'agent_start', 0);
@@ -1115,14 +1244,18 @@ export class TwilioMediaStreamHandler {
         }
         if (text.trim()) {
           sentenceBuffer += text;
-          // Stream to Cartesia at sentence boundaries for natural pacing
-          // Detect sentence-ending punctuation
+          // Stream to Cartesia at PHRASE boundaries — not just sentences.
+          // Sentence-enders always flush. Commas flush after 40+ chars.
+          // Force-flush at 120 chars to prevent dead air during long generation.
           const sentenceEnd = /[.!?;:]\s*$/;
-          if (sentenceEnd.test(sentenceBuffer)) {
-            const cleanSentence = sanitizeForTTS(formatForSpeech(sentenceBuffer.trim()));
-            if (cleanSentence) {
-              this.cartesia.streamText(cleanSentence);
+          const phraseEnd = sentenceBuffer.length >= 40 && /[,;—]\s*$/.test(sentenceBuffer);
+          const forceFlush = sentenceBuffer.length >= 120;
+          if (sentenceEnd.test(sentenceBuffer) || phraseEnd || forceFlush) {
+            const cleanPhrase = sanitizeForTTS(formatForSpeech(sentenceBuffer.trim()));
+            if (cleanPhrase) {
+              this.cartesia.streamText(cleanPhrase);
               streamingStarted = true;
+              this.naturalness.recordTurn('agent', cleanPhrase);
             }
             sentenceBuffer = '';
           }
@@ -1150,10 +1283,13 @@ export class TwilioMediaStreamHandler {
     if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
     if (!this.isStreaming) return;
     this.silenceTimer = setTimeout(async () => {
+      // Only fire silence prompt when truly idle — not during generation, speaking, or tool execution
       if (this.isStreaming && !this.isSpeaking && this.callState === 'listening') {
         this.logger.info('Silence timeout');
         await this.speak('Are you still there?');
       }
+      // If callState is 'thinking' or 'speaking', skip — the agent is working on a response.
+      // The old code could overlap with active TTS, causing audio collision.
     }, TwilioMediaStreamHandler.SILENCE_TIMEOUT_MS);
   }
 
@@ -1169,7 +1305,13 @@ export class TwilioMediaStreamHandler {
 
   private async endCall(): Promise<void> {
     this.logger.info({ callSid: this.callSid }, 'Ending call');
-    await this.pipelineController.endCall('completed');
+    const session = await this.pipelineController.endCall('completed');
+    if (this.onQualityScore && session.scorecard) {
+      const score = _complianceScore(session.scorecard);
+      this.onQualityScore(session.conversationId, score).catch((err: Error) => {
+        this.logger.warn({ error: err.message }, 'quality_score_update_failed');
+      });
+    }
     this.cleanup();
     this.ws.close(1000, 'call_ended');
   }
@@ -1226,6 +1368,66 @@ export class TwilioMediaStreamHandler {
         this.logger.info({ phone: this.sessionConfig.callerPhone, durationSec, outcome: this.callOutcome }, 'Call summary saved to memory');
       } catch (err: any) {
         this.logger.warn({ error: err?.message }, 'Failed to save call summary to memory');
+      }
+    }
+
+    // Post-call Claude summary → GHL CRM push
+    if (this.sessionConfig?.callerPhone && this.callStartTime) {
+      try {
+        const durationSec = Math.round((Date.now() - this.callStartTime.getTime()) / 1000);
+        const agentName = String(this.sessionConfig.model || 'JACK');
+        const sentiment = this.sentimentScore >= 1 ? 'positive' : this.sentimentScore <= -1 ? 'negative' : 'neutral';
+        const _intentLabels: Record<string, string> = {
+          balance_inquiry: 'account balance',
+          pricing_inquiry: 'gold/silver pricing',
+          loan_inquiry: 'loan details',
+          payment_inquiry: 'payment scheduling',
+          payment_status: 'payment status',
+          account_status: 'account status',
+          card_status: 'card status',
+          transfer_request: 'wire/transfer',
+          order_execution: 'order placement',
+          settlement_status: 'settlement status',
+          dscr_calculation: 'DSCR / loan qualification',
+          escrow_inquiry: 'escrow balance',
+          payoff_quote: 'payoff quote',
+          fx_exposure: 'FX/currency exposure',
+          sanctions_check: 'sanctions screening',
+          opt_out: 'opt-out request',
+          escalate: 'escalation to human',
+          general_inquiry: 'general inquiry',
+          outbound_greeting: 'outbound call',
+          post_call_summary: 'call wrap-up',
+        };
+        const topicLabels = this.topicsDiscussed
+          .map(t => _intentLabels[t] ?? t.replace(/_/g, ' '))
+          .join(', ') || 'general inquiry';
+        const summaryPrompt = `Call summary:\n- Agent: ${agentName}\n- Duration: ${durationSec}s\n- Topics: ${topicLabels}\n- Outcome: ${this.callOutcome}\n- Sentiment: ${sentiment}\n\nWrite 2-3 sentence CRM note with action items.`;
+        const summaryResult = await this.generateLLMResponse({
+          provider: 'claude',
+          intent: 'post_call_summary',
+          userUtterance: summaryPrompt,
+          responseInstruction: 'Write concise CRM call notes. 2-3 sentences. Include outcome and next steps.',
+          tools: [],
+          latencyBudget: 8000,
+          authTier: 0,
+        });
+        const ocClient = getOpenClawClient(this.logger);
+        await ocClient.crmOperate({
+          action: 'create_or_update_contact',
+          phone: this.sessionConfig.callerPhone,
+          lead_source: `AI_voice_${agentName.toLowerCase()}`,
+          agent: agentName,
+          call_duration_sec: durationSec,
+          call_outcome: this.callOutcome,
+          call_summary: summaryResult ?? '',
+          topics: this.topicsDiscussed,
+          sentiment,
+          language: this.detectedLanguage,
+        });
+        this.logger.info({ phone: this.sessionConfig.callerPhone }, 'Post-call summary pushed to CRM');
+      } catch (err: any) {
+        this.logger.warn({ error: err?.message }, 'Post-call CRM push failed (non-critical)');
       }
     }
 

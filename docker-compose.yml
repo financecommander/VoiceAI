@@ -106,6 +106,25 @@ services:
       CARTESIA_VOICE_EUREKA: ${CARTESIA_VOICE_EUREKA:-}
       CARTESIA_VOICE_IFSE: ${CARTESIA_VOICE_IFSE:-}
     restart: unless-stopped
+    # Resource limits: prevent GC pauses from memory pressure and CPU starvation.
+    # Voice requires consistent low-latency — GC jank from unbounded memory is
+    # the #1 cause of intermittent audio stuttering under load.
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    # Host networking eliminates 2-5ms per WebSocket frame vs bridge mode.
+    # Critical for real-time audio where every ms counts.
+    network_mode: host
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   # --------------------------------------------------------------------------
   # Drizzle Studio — Database GUI (optional, dev only)
