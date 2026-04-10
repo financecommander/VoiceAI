@@ -33,12 +33,29 @@ export interface SwarmNode {
 }
 
 export const SWARM_NODES: SwarmNode[] = [
-  { name: 'swarm-mainframe',  externalIp: '34.148.140.31',  role: 'orchestration' },
-  { name: 'swarm-gpu',        externalIp: '35.227.111.161', role: 'inference' },
-  { name: 'fc-ai-portal',     externalIp: '34.139.78.75',   role: 'api-hub' },
-  { name: 'sw-gpu-voice-01',  externalIp: '',                role: 'voice' },
-  { name: 'sw-gpu-voice-02',  externalIp: '',                role: 'voice' },
-  { name: 'portal-ai-01',     externalIp: '34.139.78.75',   role: 'api-hub' },
+  // --- GCP Swarm VMs (sw-* and swarm-* prefixed) ---
+  { name: 'sw-mainframe-01',   externalIp: '34.148.140.31',  role: 'orchestration' },
+  { name: 'sw-gpu-voice-01',   externalIp: '',                role: 'voice' },
+  { name: 'sw-gpu-voice-02',   externalIp: '',                role: 'voice' },
+  { name: 'sw-gpu-a100-01',    externalIp: '',                role: 'inference' },
+  { name: 'sw-gpu-core-01',    externalIp: '',                role: 'inference' },
+  { name: 'sw-gpu-code-01',    externalIp: '',                role: 'codegen' },
+  { name: 'sw-gpu-code-02',    externalIp: '',                role: 'codegen' },
+  { name: 'sw-gpu-embed-01',   externalIp: '',                role: 'embedding' },
+  { name: 'sw-gpu-mee-01',     externalIp: '',                role: 'inference' },
+  { name: 'sw-gpu-mee-02',     externalIp: '',                role: 'inference' },
+  { name: 'sw-data-01',        externalIp: '',                role: 'storage' },
+  { name: 'sw-worker-01',      externalIp: '',                role: 'worker' },
+  { name: 'sw-worker-02',      externalIp: '',                role: 'worker' },
+  { name: 'sw-worker-03',      externalIp: '',                role: 'worker' },
+  // --- Legacy aliases (kept for backward compat) ---
+  { name: 'swarm-mainframe',   externalIp: '34.148.140.31',  role: 'orchestration' },
+  { name: 'swarm-gpu',         externalIp: '35.227.111.161', role: 'inference' },
+  // --- Portal / API hubs ---
+  { name: 'portal-ai-01',      externalIp: '34.139.78.75',   role: 'api-hub' },
+  { name: 'fc-ai-portal',      externalIp: '34.139.78.75',   role: 'api-hub' },
+  // --- On-prem mini PCs (5 units, names TBD — accept any mini-* prefix) ---
+  // Mini PCs are validated by prefix match in checkSwarmEnvironment(), not this list
 ];
 
 const ALLOWED_NODE_NAMES = new Set(SWARM_NODES.map(n => n.name));
@@ -80,17 +97,21 @@ export function checkSwarmEnvironment(): SwarmGuardResult {
     };
   }
 
-  // SWARM_NODE_NAME must be a registered Swarm node
-  if (!ALLOWED_NODE_NAMES.has(nodeName)) {
+  // SWARM_NODE_NAME must be a registered Swarm node or match a known prefix
+  // Swarm = all VMs with sw-/swarm- prefix + on-prem mini PCs (mini-* prefix)
+  const isKnownNode = ALLOWED_NODE_NAMES.has(nodeName);
+  const isSwarmPrefix = /^(sw-|swarm-|mini-)/.test(nodeName);
+  if (!isKnownNode && !isSwarmPrefix) {
     return {
       allowed: false,
-      reason: `SWARM_NODE_NAME='${nodeName || '(unset)'}' — not a recognised Swarm node (${[...ALLOWED_NODE_NAMES].join(', ')})`,
+      reason: `SWARM_NODE_NAME='${nodeName || '(unset)'}' — not a recognised Swarm node (must be in registry or have sw-/swarm-/mini- prefix)`,
       node: null,
       bypass: false,
     };
   }
 
-  const node = SWARM_NODES.find(n => n.name === nodeName)!;
+  const node = SWARM_NODES.find(n => n.name === nodeName)
+    ?? { name: nodeName, externalIp: '', role: isSwarmPrefix ? 'swarm-member' : 'unknown' };
 
   return {
     allowed: true,

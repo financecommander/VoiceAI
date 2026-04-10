@@ -56,8 +56,8 @@ const REQUIRED_VARS: EnvVar[] = [
   // --- Swarm Sandbox Identity (fatal — required by swarm-guard; prevents running outside Swarm VMs) ---
   { name: 'SWARM_ENVIRONMENT_ID', severity: 'fatal', description: 'Must be "swarm" on Swarm VMs (swarm-guard DIRECTIVE-259)',
     validate: (v) => v === 'swarm' },
-  { name: 'SWARM_NODE_NAME', severity: 'fatal', description: 'Swarm node name',
-    validate: (v) => ['swarm-mainframe', 'swarm-gpu', 'fc-ai-portal', 'sw-gpu-voice-01', 'sw-gpu-voice-02', 'portal-ai-01'].includes(v) },
+  { name: 'SWARM_NODE_NAME', severity: 'fatal', description: 'Swarm node name (sw-*/swarm-*/mini-* prefix or registered node)',
+    validate: (v) => /^(sw-|swarm-|mini-)/.test(v) || ['fc-ai-portal', 'portal-ai-01'].includes(v) },
 
   // --- Swarm Mainframe (warning — enhanced AI ecosystem when available) ---
   { name: 'SWARM_MAINFRAME_URL', severity: 'warning', description: 'Swarm mainframe base URL (e.g., http://34.148.140.31:8080)',
