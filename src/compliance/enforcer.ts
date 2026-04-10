@@ -20,6 +20,7 @@ import type {
 } from '../types.js';
 import type { IConsentService, IAuditService, ConsentRecord, DNCResult } from '../services/contracts.js';
 import type { Logger } from 'pino';
+import { getNarrowGatePolicyEngine, type NarrowGatePolicyInput } from './narrow-gate-policy.js';
 
 // ============================================================================
 // Configuration
@@ -129,7 +130,7 @@ export interface CallContext {
 // ============================================================================
 
 export class ComplianceEnforcer {
-  private config: ComplianceConfig;
+  readonly config: ComplianceConfig;
   private consentService: IConsentService;
   private auditService: IAuditService;
   private logger: Logger;
@@ -144,6 +145,16 @@ export class ComplianceEnforcer {
     this.consentService = consentService;
     this.auditService = auditService;
     this.logger = logger.child({ component: 'ComplianceEnforcer' });
+    // Initialise narrow gate policy engine (report-only)
+    getNarrowGatePolicyEngine(this.logger);
+  }
+
+  /**
+   * Check a proposed gate application against the narrow gate policy.
+   * Never blocks — violations are logged as warnings only.
+   */
+  checkNarrowGate(input: NarrowGatePolicyInput): void {
+    getNarrowGatePolicyEngine().check(input);
   }
 
   // ==========================================================================

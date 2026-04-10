@@ -219,36 +219,46 @@ export class VoicePipelineController {
       const failures = gateResults.filter(g => !g.passed);
 
       if (failures.length > 0) {
-        this.session.preDialGatesPassed = false;
-        this.session.outcome = 'blocked_pre_dial';
-        this.session.endedAt = new Date();
+        const isAdvisory = this.compliance.config?.enforcement === 'advisory'
+          || process.env.COMPLIANCE_MODE === 'advisory';
 
-        this.logger.warn({
-          failures: failures.map(f => ({ gate: f.gateName, reason: f.reason })),
-        }, 'Call BLOCKED by pre-dial gates');
+        if (isAdvisory) {
+          this.logger.warn({
+            failures: failures.map(f => ({ gate: f.gateName, reason: f.reason })),
+          }, 'Pre-dial gate failures (advisory mode — proceeding anyway)');
+          this.session.preDialGatesPassed = true;
+        } else {
+          this.session.preDialGatesPassed = false;
+          this.session.outcome = 'blocked_pre_dial';
+          this.session.endedAt = new Date();
 
-        await this.auditService.logEvent({
-          timestamp: new Date(),
-          conversationId,
-          model: params.model,
-          eventType: 'compliance_gate_fail',
-          authTier: params.initialAuthTier,
-          customerId: params.customerId,
-          intent: null,
-          action: 'pre_dial_gates',
-          result: `blocked: ${failures.map(f => f.reason).join(', ')}`,
-          metadata: { gateResults },
-          createdByAgent: true,
-        });
+          this.logger.warn({
+            failures: failures.map(f => ({ gate: f.gateName, reason: f.reason })),
+          }, 'Call BLOCKED by pre-dial gates');
 
-        return {
-          proceed: false,
-          blockReason: failures[0].reason,
-          session: this.session,
-        };
+          await this.auditService.logEvent({
+            timestamp: new Date(),
+            conversationId,
+            model: params.model,
+            eventType: 'compliance_gate_fail',
+            authTier: params.initialAuthTier,
+            customerId: params.customerId,
+            intent: null,
+            action: 'pre_dial_gates',
+            result: `blocked: ${failures.map(f => f.reason).join(', ')}`,
+            metadata: { gateResults },
+            createdByAgent: true,
+          });
+
+          return {
+            proceed: false,
+            blockReason: failures[0].reason,
+            session: this.session,
+          };
+        }
+      } else {
+        this.session.preDialGatesPassed = true;
       }
-
-      this.session.preDialGatesPassed = true;
     } else {
       // Inbound calls skip pre-dial gates
       this.session.preDialGatesPassed = true;

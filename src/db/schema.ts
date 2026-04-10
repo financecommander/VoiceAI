@@ -25,6 +25,9 @@ import {
   pgEnum,
   index,
   real,
+  primaryKey,
+  foreignKey,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 // ============================================================================
@@ -58,9 +61,28 @@ export const auditEventTypeEnum = pgEnum('audit_event_type', [
   'tool_executed', 'tool_error', 'escalation_triggered',
   'compliance_gate_passed', 'compliance_gate_failed',
   'pipeline_switched', 'recording_started', 'recording_stopped',
+  // Operator hardening events
+  'operator_login', 'operator_action', 'operator_logout',
+  'approval_requested', 'approval_granted', 'approval_rejected',
+  'sandbox_violation', 'sandbox_timeout',
+  'drill_started', 'drill_completed',
+  'session_force_killed', 'config_changed',
+  'portal_connected', 'portal_command',
 ]);
 
 export const turnRoleEnum = pgEnum('turn_role', ['user', 'assistant', 'system', 'tool']);
+
+export const operatorRoleEnum = pgEnum('operator_role', [
+  'superadmin', 'operator', 'viewer', 'portal_service',
+]);
+
+export const approvalStatusEnum = pgEnum('approval_status', [
+  'pending', 'approved', 'rejected', 'expired', 'auto_approved',
+]);
+
+export const drillStatusEnum = pgEnum('drill_status', [
+  'running', 'passed', 'failed', 'aborted',
+]);
 
 // ============================================================================
 // Voice Sessions
@@ -265,6 +287,143 @@ export const conversationTurns = pgTable('conversation_turns', {
 // DNC Suppression List
 // ============================================================================
 
+// ============================================================================
+// Operator Users (Dashboard / Portal Auth)
+// ============================================================================
+
+export const operatorUsers = pgTable('operator_users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  name: varchar('name', { length: 128 }).notNull(),
+  role: operatorRoleEnum('role').notNull().default('viewer'),
+
+  isActive: boolean('is_active').notNull().default(true),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  emailIdx: index('idx_operator_email').on(table.email),
+}));
+
+// ============================================================================
+// Operator Sessions (JWT Tracking)
+// ============================================================================
+
+export const operatorSessions = pgTable('operator_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => operatorUsers.id).notNull(),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+  ipAddress: varchar('ip_address', { length: 45 }),
+  userAgent: text('user_agent'),
+  revoked: boolean('revoked').notNull().default(false),
+
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index('idx_op_sessions_user').on(table.userId),
+  tokenIdx: index('idx_op_sessions_token').on(table.tokenHash),
+}));
+
+// ============================================================================
+// Approval Requests (Sensitive Action Workflow)
+// ============================================================================
+
+export const approvalRequests = pgTable('approval_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actionType: varchar('action_type', { length: 128 }).notNull(),
+  description: text('description').notNull(),
+
+  requestedBy: uuid('requested_by').references(() => operatorUsers.id),
+  requestedByAgent: varchar('requested_by_agent', { length: 64 }),
+
+  status: approvalStatusEnum('status').notNull().default('pending'),
+  approvedBy: uuid('approved_by').references(() => operatorUsers.id),
+
+  context: jsonb('context').$type<Record<string, unknown>>(),
+  result: text('result'),
+
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+}, (table) => ({
+  statusIdx: index('idx_approvals_status').on(table.status),
+  requestedAtIdx: index('idx_approvals_requested_at').on(table.requestedAt),
+}));
+
+// ============================================================================
+// Sandbox Executions (Tool Isolation Audit)
+// ============================================================================
+
+export const sandboxExecutions = pgTable('sandbox_executions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  toolName: varchar('tool_name', { length: 128 }).notNull(),
+  isolated: boolean('isolated').notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  success: boolean('success').notNull(),
+  error: text('error'),
+
+  inputHash: varchar('input_hash', { length: 64 }),
+  outputSizeBytes: integer('output_size_bytes'),
+  resourceUsage: jsonb('resource_usage').$type<Record<string, unknown>>(),
+
+  sessionId: uuid('session_id').references(() => voiceSessions.id),
+  timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  toolIdx: index('idx_sandbox_tool').on(table.toolName),
+  timestampIdx: index('idx_sandbox_timestamp').on(table.timestamp),
+}));
+
+// ============================================================================
+// Failure Drill Runs
+// ============================================================================
+
+export const failureDrillRuns = pgTable('failure_drill_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  drillType: varchar('drill_type', { length: 64 }).notNull(),
+  scenario: varchar('scenario', { length: 128 }).notNull(),
+  status: drillStatusEnum('status').notNull().default('running'),
+
+  triggeredBy: uuid('triggered_by').references(() => operatorUsers.id),
+
+  results: jsonb('results').$type<Record<string, unknown>>(),
+  durationMs: integer('duration_ms'),
+
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => ({
+  drillTypeIdx: index('idx_drills_type').on(table.drillType),
+  startedAtIdx: index('idx_drills_started_at').on(table.startedAt),
+}));
+
+// ============================================================================
+// System Metrics Snapshots (Dashboard Time-Series)
+// ============================================================================
+
+export const systemMetricsSnapshots = pgTable('system_metrics_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  activeCalls: integer('active_calls').notNull(),
+  agentsOnline: integer('agents_online').notNull(),
+  cpuPct: real('cpu_pct'),
+  memoryMb: real('memory_mb'),
+  latencyP50Ms: integer('latency_p50_ms'),
+  latencyP99Ms: integer('latency_p99_ms'),
+  errorRate: real('error_rate'),
+  callsLast5Min: integer('calls_last_5_min'),
+
+  custom: jsonb('custom').$type<Record<string, unknown>>(),
+
+  timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  timestampIdx: index('idx_metrics_timestamp').on(table.timestamp),
+}));
+
+// ============================================================================
+// DNC Suppression List
+// ============================================================================
+
 export const dncList = pgTable('dnc_list', {
   id: uuid('id').primaryKey().defaultRandom(),
   phone: varchar('phone', { length: 20 }).notNull().unique(),
@@ -276,4 +435,61 @@ export const dncList = pgTable('dnc_list', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   phoneIdx: index('idx_dnc_phone').on(table.phone),
+}));
+
+// ============================================================================
+// Router Training — adaptive_provider_router data collection
+// ============================================================================
+
+/**
+ * Telemetry snapshot taken at routing decision time.
+ * Composite PK (telemetry_snapshot_id, provider_id) — one row per provider per request.
+ * For Phase 1 we capture the selected provider only; multi-candidate rows added later.
+ */
+export const telemetrySnapshots = pgTable('telemetry_snapshots', {
+  telemetrySnapshotId: uuid('telemetry_snapshot_id').notNull().defaultRandom(),
+  providerId: varchar('provider_id', { length: 64 }).notNull(),
+  requestId: uuid('request_id').notNull(),
+  taskType: varchar('task_type', { length: 64 }),
+  estimatedLatencyMs: integer('estimated_latency_ms'),
+  estimatedCostUsd: real('estimated_cost_usd'),
+  providerAvailable: boolean('provider_available').notNull().default(true),
+  snapshotAt: timestamp('snapshot_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.telemetrySnapshotId, table.providerId] }),
+  requestIdx: index('idx_telemetry_request_id').on(table.requestId),
+}));
+
+/**
+ * Pointwise binary ranking training set.
+ * was_oracle_best is NULL until nightly oracle recompute job fills it in.
+ * Unique on (request_id, provider_id) — one row per provider per request.
+ * FK: (telemetry_snapshot_id, provider_id) → telemetry_snapshots composite PK.
+ */
+export const routerTrainingLog = pgTable('router_training_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  requestId: uuid('request_id').notNull(),
+  telemetrySnapshotId: uuid('telemetry_snapshot_id').notNull(),
+  providerId: varchar('provider_id', { length: 64 }).notNull(),
+  // Conversation linkage — used to UPDATE quality scores at call end
+  conversationId: varchar('conversation_id', { length: 64 }),
+  // Oracle labels — NULL until nightly recompute fills them in (24h lag)
+  wasOracleBest: boolean('was_oracle_best'),
+  qualityScoreSource: varchar('quality_score_source', { length: 32 }), // verifier|human|auto_eval|registry_baseline
+  oracleTieCount: integer('oracle_tie_count'),
+  // Outcome — captured post-call
+  actualLatencyMs: integer('actual_latency_ms'),
+  actualQualityScore: real('actual_quality_score'),
+  callSuccess: boolean('call_success').notNull().default(false),
+  wasFallback: boolean('was_fallback').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  requestProviderUniq: unique('uq_router_request_provider').on(table.requestId, table.providerId),
+  snapshotFk: foreignKey({
+    columns: [table.telemetrySnapshotId, table.providerId],
+    foreignColumns: [telemetrySnapshots.telemetrySnapshotId, telemetrySnapshots.providerId],
+  }),
+  requestIdx: index('idx_router_log_request_id').on(table.requestId),
+  conversationIdx: index('idx_router_log_conversation_id').on(table.conversationId),
+  createdAtIdx: index('idx_router_log_created_at').on(table.createdAt),
 }));

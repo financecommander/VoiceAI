@@ -8,7 +8,8 @@
 import { eq, desc } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { Database } from '../db/client.js';
-import { voiceSessions, conversationTurns } from '../db/schema.js';
+import { voiceSessions, conversationTurns, routerTrainingLog } from '../db/schema.js';
+import type { RouterLogEntry } from '../llm/provider.js';
 
 export class SessionService {
   private db: Database;
@@ -105,5 +106,37 @@ export class SessionService {
       .where(eq(voiceSessions.callSid, callSid))
       .limit(1);
     return results[0] ?? null;
+  }
+
+  /**
+   * Insert a router training log row.
+   * Fire-and-forget from LLM call path — caller must swallow errors.
+   */
+  async insertRouterLog(entry: RouterLogEntry): Promise<void> {
+    await this.db.insert(routerTrainingLog).values({
+      requestId: entry.requestId,
+      telemetrySnapshotId: entry.telemetrySnapshotId,
+      providerId: entry.provider,
+      conversationId: entry.conversationId,
+      actualLatencyMs: Math.round(entry.actualLatencyMs),
+      callSuccess: entry.callSuccess,
+      wasFallback: entry.wasFallback,
+    });
+  }
+
+  /**
+   * Update actual_quality_score on all router_training_log rows for a conversation.
+   * Called once at call end, after ComplianceScorecard is generated.
+   * quality_score_source = 'auto_eval' for scorecard-derived scores.
+   */
+  async updateRouterQualityScores(
+    conversationId: string,
+    score: number,
+    source: 'auto_eval' | 'human' | 'verifier' | 'registry_baseline',
+  ): Promise<void> {
+    await this.db.update(routerTrainingLog)
+      .set({ actualQualityScore: score, qualityScoreSource: source })
+      .where(eq(routerTrainingLog.conversationId, conversationId));
+    this.logger.debug({ conversationId, score, source }, 'Router quality scores updated');
   }
 }

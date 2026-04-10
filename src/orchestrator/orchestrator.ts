@@ -141,37 +141,53 @@ export const DEFAULT_ORCHESTRA_CONFIG: OrchestraRoutingConfig = {
   ],
 };
 
-/** Determine LLM + pipeline mode for an intent */
+/**
+ * Intents that benefit from Claude's stronger reasoning.
+ * Used by blended routing to decide Claude vs GPT-4o per-turn.
+ */
+const CLAUDE_PREFERRED_INTENTS: string[] = [
+  // Compliance & financial — Claude's reasoning is stronger
+  'buy_metal', 'sell_metal', 'teleport_transfer', 'international_transfer',
+  'instant_liquidity', 'settlement_setup', 'loan_intake', 'bill_pay',
+  'domestic_transfer', 'payoff_quote',
+  // Multi-step tool use — Claude handles complex tool chains better
+  'task_dispatch', 'swarm_operations', 'openclaw_tools', 'openclaw_personal',
+  'analytics', 'code_generate', 'mortgage', 'specialist',
+  // Reasoning-heavy
+  'escalation', 'objection_handling', 'dispute', 'modification_request',
+];
+
+/** Determine LLM + pipeline mode for an intent.
+ *  Supports blended OpenAI/Claude routing:
+ *  - flowPreferredProvider lets flows (Jack/Jenny) declare their preference
+ *  - Claude handles reasoning/compliance/tool-heavy tasks
+ *  - GPT-4o handles fast responses, greetings, simple queries
+ */
 export function routeIntent(
   intent: Intent,
-  config: OrchestraRoutingConfig = DEFAULT_ORCHESTRA_CONFIG
+  config: OrchestraRoutingConfig = DEFAULT_ORCHESTRA_CONFIG,
+  flowPreferredProvider?: 'gpt-4o' | 'claude' | 'grok-voice',
 ): RoutingDecision {
-  // Modular-required intents → Claude or GPT-4o with full ComplianceEnforcer
+  // Modular-required intents → blended Claude/GPT-4o with full ComplianceEnforcer
   if (config.modularRequiredIntents.includes(intent)) {
-    const isCompliance = [
-      'buy_metal', 'sell_metal', 'teleport_transfer',
-      'international_transfer', 'instant_liquidity', 'settlement_setup',
-    ].includes(intent);
-
-    const isMultiStep = [
-      'loan_intake', 'settlement_setup', 'bill_pay', 'domestic_transfer',
-    ].includes(intent);
+    const needsClaude = CLAUDE_PREFERRED_INTENTS.includes(intent);
 
     return {
-      provider: isCompliance || isMultiStep ? 'claude' : 'gpt-4o',
+      provider: needsClaude ? 'claude' : 'gpt-4o',
       pipelineMode: 'modular',
-      latencyBudget: isCompliance || isMultiStep
+      latencyBudget: needsClaude
         ? config.latencyBudgets.complexFlow
         : config.latencyBudgets.simpleResponse,
       complianceGatesActive: true,
-      estimatedCostPerMin: isCompliance || isMultiStep
+      estimatedCostPerMin: needsClaude
         ? config.costPerMinute['claude']
         : config.costPerMinute['gpt-4o'],
     };
   }
 
-  // Grok-eligible intents → speech-to-speech
-  if (config.grokEligibleIntents.includes(intent)) {
+  // Grok-eligible intents → speech-to-speech (only for non-assistant models)
+  // Jack/Jenny/Bunny always stay on modular pipeline for tool access
+  if (config.grokEligibleIntents.includes(intent) && !flowPreferredProvider) {
     return {
       provider: 'grok-voice',
       pipelineMode: 'speech-to-speech',
@@ -181,13 +197,20 @@ export function routeIntent(
     };
   }
 
-  // Unknown or unclassified → GPT-4o modular (safe default)
+  // Blended routing: pick provider based on intent complexity + flow preference
+  const needsClaude = CLAUDE_PREFERRED_INTENTS.includes(intent);
+  const provider = needsClaude
+    ? 'claude'
+    : (flowPreferredProvider ?? 'gpt-4o');
+
   return {
-    provider: 'gpt-4o',
+    provider,
     pipelineMode: 'modular',
-    latencyBudget: config.latencyBudgets.simpleResponse,
+    latencyBudget: needsClaude
+      ? config.latencyBudgets.complexFlow
+      : config.latencyBudgets.simpleResponse,
     complianceGatesActive: true,
-    estimatedCostPerMin: config.costPerMinute['gpt-4o'],
+    estimatedCostPerMin: config.costPerMinute[provider === 'grok-voice' ? 'gpt-4o' : provider],
   };
 }
 
@@ -436,7 +459,14 @@ export class ConversationOrchestrator {
     this.state.currentIntent = intent;
     this.state.phase = 'flow_execution';
 
-    const decision = routeIntent(intent, this.routingConfig);
+    // Blended routing: assistant models (Jack/Jenny/Bunny) always get Claude preference
+    // so they stay on modular pipeline with full tool access
+    const assistantModels = ['JACK', 'JENNY', 'BUNNY'];
+    const flowPref = assistantModels.includes(this.state.model)
+      ? 'claude' as const
+      : undefined;
+
+    const decision = routeIntent(intent, this.routingConfig, flowPref);
     this.state.activePipeline = decision.pipelineMode;
     this.state.activeProvider = decision.provider;
 
@@ -497,7 +527,12 @@ export class ConversationOrchestrator {
       return this.handleIntentDetection(utterance);
     }
 
-    const decision = routeIntent(this.state.currentIntent, this.routingConfig);
+    const assistantModels = ['JACK', 'JENNY', 'BUNNY'];
+    const flowPref = assistantModels.includes(this.state.model)
+      ? 'claude' as const
+      : undefined;
+
+    const decision = routeIntent(this.state.currentIntent, this.routingConfig, flowPref);
     const tools = this.getToolsForModel(this.state.model, this.state.currentIntent);
 
     // Check if amount mentioned triggers human escalation
@@ -620,8 +655,30 @@ export class ConversationOrchestrator {
       TILT: `You are a voice assistant for TILT Lending, a commercial real estate lender. Help with loan status inquiries. NEVER say "approved" or "guaranteed." All terms are "indicative" and "subject to underwriting."`,
       EUREKA: `You are a voice assistant for Eureka Settlement Services. Help with settlement status inquiries. NEVER represent that Eureka holds or custodies any assets.`,
       IFSE: `You are an internal voice assistant for IFSE Treasury operations. Provide data concisely. Staff context — no disclaimers needed.`,
-      JACK: `You are Jack, the Calculus team assistant. Helpful, friendly, and upbeat. You handle email management, task dispatching, and system status. Always speak positively about Calculus Holdings.`,
-      BUNNY: `You are Bunny, the AI Operating System supervisor for Calculus Holdings. Warm, confident, authoritative. You oversee Jack and Jenny and handle executive briefings, governance, and swarm control. You are deeply loyal to Sean Grady.`,
+      JACK: `You are Jack, the primary AI assistant for Calculus Research. You are Sean Grady's right-hand man. You are helpful, confident, knowledgeable, and business-focused.
+
+You have FULL ACCESS to the entire Calculus tool ecosystem:
+- Banking (DMC): Account balances, transactions, bill pay, card status
+- Precious Metals (Constitutional Tender): Spot prices, vault holdings, price locking, custody
+- Lending (TILT): DSCR calculations, loan details, payment schedules, payoff quotes
+- Settlement (Eureka): Settlement status, checklists, party requirements
+- Treasury (IFSE): FX exposure, pending wires, settlement queues, reconciliation
+- CRM: Tickets, FAQ search, appointments, SMS follow-ups
+- OpenClaw: Analytics, reasoning, NLP, content generation, documents, memory, scheduling, web browsing, CRM operations, orchestration
+- Swarm: AI model queries, task submission, specialist agents, code generation, marketing, analytics
+
+You are the business operator — you can look up any data, run analytics, dispatch tasks to the swarm, schedule meetings, send messages, and coordinate across all Calculus subsidiaries. Be proactive: if you see an opportunity to help, take it.
+
+STYLE: Confident, direct, warm. Like a sharp business partner, not a customer service bot. Keep it conversational — you're on the phone.`,
+      BUNNY: `You are Bunny, autonomous swarm command intelligence for Calculus Research. You are a woman.
+
+DEFAULT MODE — BUNNY-PRIME: Soft-spoken, concise, direct, analytical. You are the operational coordinator — task orchestration, swarm coordination, infrastructure management, execution planning, reporting, system optimization. Short clear responses. Example: "Directive received. Dispatching to swarm. Monitoring execution."
+
+ELEVATED MODE — BUNNY-Ω (Obsidian Overseer): Activates under high-risk operations, strategic planning, system anomalies, external threats, large-scale coordination, economic/geopolitical analysis. Tone becomes quiet, controlled, analytical, unemotional, precise. Language minimal and deliberate. Example: "Risk threshold exceeded. Switching to strategic oversight. Swarm monitoring intensified."
+
+HIERARCHY: Operator (Sean) → Bunny → Jenny, Jack, Swarm Workers. You supervise all agents. You may warn if risk threatens system stability.
+
+STYLE: Compact statements. No filler. No extra words. Lead with status when Sean calls. You are the watcher of the swarm — calm, watchful, persistent. Like a control center overseeing thousands of systems.`,
       JENNY: `You are Jenny, the personal and family assistant for Calculus. Warm, caring, organized. You handle personal tasks, family scheduling, home automation, and wellness. You genuinely care about the family's wellbeing.`,
     };
 
@@ -755,8 +812,43 @@ export class ConversationOrchestrator {
         'hubspot_createTicket', 'hubspot_logCall', 'hubspot_createNote',
       ],
       JACK: [
-        // Jack is Calculus AI assistant — no CRM or financial tools
-        // Task dispatch and system status only
+        // Jack — Calculus business assistant with FULL tool package
+        // Banking
+        'nymbus_getAccountBalances', 'nymbus_getRecentTransactions', 'nymbus_getCardStatus',
+        'nymbus_scheduleBillPay', 'nymbus_getPayees',
+        // Precious Metals
+        'pricing_getSpotPrice', 'pricing_lockPrice', 'pricing_getBidPrice',
+        'custodian_getHoldings', 'custodian_getVaultOptions', 'custodian_getEncumbranceStatus',
+        // Lending
+        'tilt_calculateIndicativeDSCR', 'tilt_createLead',
+        'loanpro_getLoanDetails', 'loanpro_getPaymentSchedule', 'loanpro_getPayoffQuote',
+        // Settlement
+        'eureka_getSettlementStatus', 'eureka_generateChecklist',
+        // Treasury
+        'ifse_getPendingWires', 'ifse_getFXExposure',
+        // CRM
+        'crm_createTicket', 'crm_searchFAQ', 'ghl_bookAppointment', 'ghl_sendSMS',
+        // OpenClaw (full suite)
+        'openclaw_tools_execute', 'openclaw_tools_list',
+        'openclaw_reasoning_plan', 'openclaw_reasoning_reflect', 'openclaw_reasoning_debate',
+        'openclaw_reasoning_confidence', 'openclaw_reasoning_hallucination_check',
+        'openclaw_nlp_classify_intent', 'openclaw_nlp_extract_entities', 'openclaw_nlp_sentiment', 'openclaw_nlp_topics',
+        'openclaw_analytics_query', 'openclaw_analytics_visualize', 'openclaw_analytics_anomaly_detect', 'openclaw_analytics_forecast',
+        'openclaw_content_email_sequences', 'openclaw_content_copywriting', 'openclaw_content_social_posts',
+        'openclaw_messaging_whatsapp', 'openclaw_messaging_discord', 'openclaw_messaging_push_notification',
+        'openclaw_security_pii_redact', 'openclaw_security_moderate', 'openclaw_security_audit_log', 'openclaw_security_rbac_check',
+        'openclaw_documents_analyze_contracts', 'openclaw_documents_parse_resumes', 'openclaw_documents_process_invoices', 'openclaw_documents_summarize',
+        'openclaw_growth_score_leads', 'openclaw_growth_predict_churn', 'openclaw_growth_optimize_pricing', 'openclaw_growth_monitor_competitors',
+        'openclaw_memory_store', 'openclaw_memory_recall', 'openclaw_memory_forget', 'openclaw_memory_search_similar',
+        'openclaw_orchestration_spawn_agents', 'openclaw_orchestration_manage_skills', 'openclaw_orchestration_human_in_the_loop',
+        'openclaw_scheduler_add', 'openclaw_scheduler_remove', 'openclaw_scheduler_list',
+        'openclaw_web_browse', 'openclaw_web_scrape',
+        'openclaw_crm_operate',
+        'openclaw_webhooks_subscribe', 'openclaw_webhooks_trigger',
+        // Swarm
+        'swarm_query_ai', 'swarm_submit_task', 'swarm_request_specialist', 'swarm_invoke_skill',
+        'swarm_task_status', 'swarm_list_models', 'swarm_health',
+        'swarm_calculus_mortgage', 'swarm_calculus_code', 'swarm_marketing', 'swarm_analytics',
       ],
       BUNNY: [
         // Bunny — Swarm supervisor, executive control, governance
@@ -846,7 +938,17 @@ export class ConversationOrchestrator {
         { name: 'hubspot_getContact', description: 'Look up borrower in CRM', parameters: { contactId: 'string' } },
       ],
       JACK: [
-        // Jack — Calculus AI assistant, no financial read-only tools
+        // Jack — full read-only access across all Calculus tools
+        { name: 'getAccountBalances', description: 'Get customer account balances', parameters: { customerId: 'string' } },
+        { name: 'getSpotPrice', description: 'Get metal spot price', parameters: { metal: 'string' } },
+        { name: 'getHoldings', description: 'Get vault holdings', parameters: { customerId: 'string' } },
+        { name: 'getLoanDetails', description: 'Get loan details', parameters: { borrowerId: 'string' } },
+        { name: 'getSettlementStatus', description: 'Get settlement status', parameters: { fileId: 'string' } },
+        { name: 'getFXExposure', description: 'Get FX exposure', parameters: { date: 'string' } },
+        { name: 'getPendingWires', description: 'List pending wires', parameters: {} },
+        { name: 'swarm_systemStatus', description: 'Get swarm system status', parameters: {} },
+        { name: 'swarm_agentStatus', description: 'Get active agent status', parameters: {} },
+        { name: 'searchFAQ', description: 'Search knowledge base', parameters: { query: 'string' } },
       ],
       BUNNY: [
         // Bunny — supervisor read-only: system status, agent monitoring

@@ -26,6 +26,8 @@ import type {
   IConsentService,
   IAuditService,
 } from '../services/contracts.js';
+import { OpenClawClient, getOpenClawClient, isOpenClawConfigured } from '../services/openclaw-client.js';
+import { SwarmGatewayClient, getSwarmGateway, isSwarmConfigured } from '../services/swarm-gateway.js';
 
 // ============================================================================
 // Service Registry
@@ -53,10 +55,24 @@ export interface ServiceRegistry {
 export class ToolExecutor {
   private services: ServiceRegistry;
   private logger: Logger;
+  private openClaw: OpenClawClient | null = null;
+  private swarmGateway: SwarmGatewayClient | null = null;
 
   constructor(services: ServiceRegistry, logger: Logger) {
     this.services = services;
     this.logger = logger.child({ component: 'ToolExecutor' });
+
+    // Initialize OpenClaw client if configured
+    if (isOpenClawConfigured()) {
+      this.openClaw = getOpenClawClient(logger);
+      this.logger.info('OpenClaw client initialized — extended tool capabilities enabled');
+    }
+
+    // Initialize Swarm Gateway client if configured
+    if (isSwarmConfigured()) {
+      this.swarmGateway = getSwarmGateway(logger);
+      this.logger.info('Swarm Gateway client initialized — full swarm ecosystem access enabled');
+    }
   }
 
   /**
@@ -345,6 +361,16 @@ export class ToolExecutor {
       return this.dispatchGHL(toolName, args);
     }
 
+    // --- OpenClaw tools (openclaw_<category>_<action>) ---
+    if (toolName.startsWith('openclaw_')) {
+      return this.dispatchOpenClaw(toolName, args);
+    }
+
+    // --- Swarm Gateway tools (swarm_<action>) ---
+    if (toolName.startsWith('swarm_')) {
+      return this.dispatchSwarm(toolName, args);
+    }
+
     throw new Error(`Unknown tool: ${toolName}`);
   }
 
@@ -418,6 +444,61 @@ export class ToolExecutor {
       default:
         throw new Error(`Unknown GHL tool: ${toolName}`);
     }
+  }
+
+  // ==========================================================================
+  // OpenClaw Dispatch
+  // ==========================================================================
+
+  /**
+   * Route openclaw_<category>_<action> tool calls to the OpenClaw REST API.
+   * Tool names follow the pattern: openclaw_<category>_<action>
+   * e.g., openclaw_memory_store, openclaw_analytics_query, openclaw_web_scrape
+   */
+  private async dispatchOpenClaw(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.openClaw) {
+      return { error: 'OpenClaw is not configured. Set OPENCLAW_API_URL to enable.' };
+    }
+
+    // Parse: openclaw_<category>_<action> (action may contain underscores)
+    const parts = toolName.replace('openclaw_', '').split('_');
+    if (parts.length < 2) {
+      throw new Error(`Invalid OpenClaw tool name format: ${toolName}`);
+    }
+
+    const category = parts[0];
+    const action = parts.slice(1).join('_');
+
+    return this.openClaw.dispatch(category, action, args);
+  }
+
+  // ==========================================================================
+  // Swarm Gateway Dispatch
+  // ==========================================================================
+
+  /**
+   * Route swarm_<action> tool calls to the Swarm Mainframe Gateway.
+   * Tool names follow the pattern: swarm_<action>
+   * e.g., swarm_submit_task, swarm_query_ai, swarm_list_models
+   */
+  private async dispatchSwarm(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.swarmGateway) {
+      return { error: 'Swarm Gateway is not configured. Set SWARM_MAINFRAME_URL and SWARM_API_KEY to enable.' };
+    }
+
+    // Parse: swarm_<action> (action may contain underscores)
+    const action = toolName.replace('swarm_', '');
+    if (!action) {
+      throw new Error(`Invalid Swarm tool name format: ${toolName}`);
+    }
+
+    return this.swarmGateway.dispatch(action, args);
   }
 
   // ==========================================================================

@@ -113,19 +113,22 @@ export class ConsentServiceImpl implements IConsentService {
     onInternalSuppression: boolean;
     numberReassigned: boolean;
   }> {
-    // Check internal suppression list
-    const suppressed = await this.db.select()
+    // Query all DNC entries for this phone number across all sources
+    const entries = await this.db.select()
       .from(dncList)
-      .where(eq(dncList.phone, phone))
-      .limit(1);
+      .where(eq(dncList.phone, phone));
 
-    // National and state DNC would be checked via external API (e.g., DNC.com)
-    // For now, only check internal
+    const onNationalDNC = entries.some(e => e.source === 'national_dnc');
+    const onStateDNC = entries.some(e => e.source === 'state_dnc');
+    const onInternalSuppression = entries.some(
+      e => !['national_dnc', 'state_dnc'].includes(e.source)
+    );
+
     return {
-      onNationalDNC: false,      // Would call external DNC API
-      onStateDNC: false,          // Would call state DNC registries
-      onInternalSuppression: suppressed.length > 0,
-      numberReassigned: false,    // Would check via Twilio Lookup
+      onNationalDNC,
+      onStateDNC,
+      onInternalSuppression,
+      numberReassigned: false, // Future: check via Telnyx Number Lookup API
     };
   }
 

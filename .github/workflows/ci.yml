@@ -1,0 +1,173 @@
+name: VoiceAI CI/CD
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trigger matrix:
+#   push → main      → test + deploy to fc-ai-portal (manual gate)
+#   push → develop   → test only
+#   pull_request      → test only
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  VM_NAME: fc-ai-portal
+  ZONE: us-east1-b
+  APP_DIR: /opt/voiceai
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Stage 1: Test
+  # ─────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: voiceai_test
+          POSTGRES_USER: voiceai
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://voiceai:test_password@localhost:5432/voiceai_test
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint -- --max-warnings 0
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm run test:run -- --reporter=verbose
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Stage 2: Deploy to fc-ai-portal
+  # Only on main push, after test passes, with manual approval gate.
+  #
+  # Setup: Settings → Environments → portal-production → Required reviewers
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy → fc-ai-portal
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: portal-production
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Build
+        run: npm ci && npm run build
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Copy build to portal VM
+        run: |
+          # Create tarball of built dist + package files
+          tar -czf voiceai-dist.tar.gz dist/ package.json package-lock.json
+
+          # Upload to VM
+          gcloud compute scp voiceai-dist.tar.gz "$VM_NAME:~/voiceai-dist.tar.gz" \
+            --zone="$ZONE" \
+            --project="$PROJECT_ID"
+
+      - name: Install and restart on portal VM
+        run: |
+          gcloud compute ssh "$VM_NAME" \
+            --zone="$ZONE" \
+            --project="$PROJECT_ID" \
+            --command="
+              set -euo pipefail
+
+              echo '═══ VoiceAI Deploy: \$(date -u) ═══'
+              echo 'Commit: ${{ github.sha }}'
+
+              # Extract new build
+              cd \$APP_DIR
+              tar -xzf ~/voiceai-dist.tar.gz --overwrite
+              rm ~/voiceai-dist.tar.gz
+
+              # Install production deps only
+              npm ci --omit=dev
+
+              # Restart via PM2 (zero-downtime reload)
+              if pm2 list | grep -q voiceai; then
+                pm2 reload voiceai --update-env
+              else
+                pm2 start dist/gateway/server.js --name voiceai \
+                  --exp-backoff-restart-delay=1000 \
+                  --max-memory-restart 1G
+                pm2 save
+              fi
+
+              # Wait for health
+              echo 'Waiting for health...'
+              for i in \$(seq 1 20); do
+                if curl -sf http://localhost:3000/health > /dev/null; then
+                  echo '[OK] Healthy'
+                  break
+                fi
+                sleep 5
+              done
+
+              curl -sf http://localhost:3000/health | python3 -m json.tool
+              echo '═══ Deploy Complete ═══'
+            "
+
+      - name: Post-deploy smoke test
+        run: |
+          EXTERNAL_IP=\$(gcloud compute instances describe "$VM_NAME" \
+            --zone="$ZONE" \
+            --project="$PROJECT_ID" \
+            --format="value(networkInterfaces[0].accessConfigs[0].natIP)")
+          curl -sf "http://\${EXTERNAL_IP}:3000/health" | python3 -m json.tool
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "VoiceAI deploy failed — commit ${{ github.sha }}"

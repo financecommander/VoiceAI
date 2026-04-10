@@ -17,9 +17,10 @@ interface EnvVar {
 }
 
 const REQUIRED_VARS: EnvVar[] = [
-  // --- Telephony (fatal) ---
-  { name: 'TWILIO_ACCOUNT_SID', severity: 'fatal', description: 'Twilio account SID for call handling' },
-  { name: 'TWILIO_AUTH_TOKEN', severity: 'fatal', description: 'Twilio auth token for webhook validation' },
+  // --- Telephony: Telnyx primary, Twilio fallback ---
+  { name: 'TELNYX_API_KEY', severity: 'fatal', description: 'Telnyx API key for primary telephony' },
+  { name: 'TWILIO_ACCOUNT_SID', severity: 'warning', description: 'Twilio account SID (fallback telephony)' },
+  { name: 'TWILIO_AUTH_TOKEN', severity: 'warning', description: 'Twilio auth token (fallback telephony)' },
 
   // --- LLM Providers (fatal — need at least one) ---
   { name: 'OPENAI_API_KEY', severity: 'fatal', description: 'OpenAI API key for GPT-4o' },
@@ -41,6 +42,27 @@ const REQUIRED_VARS: EnvVar[] = [
   // --- Optional Integrations (warning) ---
   { name: 'REDIS_URL', severity: 'warning', description: 'Redis connection string for session caching' },
   { name: 'GROK_API_KEY', severity: 'warning', description: 'xAI Grok API key for voice-to-voice' },
+
+  // --- OpenClaw AI Portal (warning — enhanced capabilities when available) ---
+  { name: 'OPENCLAW_API_URL', severity: 'warning', description: 'OpenClaw API base URL (e.g., http://fc-ai-portal:8100/api/v1/)',
+    validate: (v) => v.startsWith('http') },
+  { name: 'OPENCLAW_API_KEY', severity: 'warning', description: 'OpenClaw API key for authentication' },
+
+  // --- AI Portal — unified LLM routing (warning — routes LLM calls through portal) ---
+  { name: 'AI_PORTAL_URL', severity: 'warning', description: 'AI Portal base URL for unified LLM routing (e.g., http://34.139.78.75:8000)',
+    validate: (v) => v.startsWith('http') },
+  { name: 'AI_PORTAL_API_KEY', severity: 'warning', description: 'AI Portal API key for LLM gateway authentication' },
+
+  // --- Swarm Sandbox Identity (fatal — required by swarm-guard; prevents running outside Swarm VMs) ---
+  { name: 'SWARM_ENVIRONMENT_ID', severity: 'fatal', description: 'Must be "swarm" on Swarm VMs (swarm-guard DIRECTIVE-259)',
+    validate: (v) => v === 'swarm' },
+  { name: 'SWARM_NODE_NAME', severity: 'fatal', description: 'Swarm node name (swarm-mainframe | swarm-gpu | fc-ai-portal)',
+    validate: (v) => ['swarm-mainframe', 'swarm-gpu', 'fc-ai-portal'].includes(v) },
+
+  // --- Swarm Mainframe (warning — enhanced AI ecosystem when available) ---
+  { name: 'SWARM_MAINFRAME_URL', severity: 'warning', description: 'Swarm mainframe base URL (e.g., http://34.148.140.31:8080)',
+    validate: (v) => v.startsWith('http') },
+  { name: 'SWARM_API_KEY', severity: 'warning', description: 'Swarm mainframe JWT API key for authentication' },
 
   // --- Phone Numbers (warning — defaults to DMC) ---
   { name: 'PHONE_DMC', severity: 'warning', description: 'Inbound phone number for DMC model' },
