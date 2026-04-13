@@ -208,6 +208,14 @@ export class TelnyxMediaStreamHandler {
   // Stream Lifecycle
   // ==========================================================================
 
+  /** Initial config set from WebSocket URL path or external caller before stream starts */
+  private preConfig: Partial<TelnyxSessionConfig> = {};
+
+  /** Set session config from external source (e.g., parsed from stream URL path) */
+  setPreConfig(config: Partial<TelnyxSessionConfig>): void {
+    this.preConfig = config;
+  }
+
   private async handleStreamStart(msg: TelnyxStartMessage): Promise<void> {
     this.streamId = msg.stream_id;
     this.callControlId = msg.start.call_control_id;
@@ -215,14 +223,26 @@ export class TelnyxMediaStreamHandler {
 
     const params = msg.start.custom_parameters ?? {};
 
+    // Try to decode client_state (base64 JSON) — this carries agent context
+    // for calls placed via Telnyx REST API with stream_url
+    let clientState: Record<string, string> = {};
+    const rawClientState = (msg as any).start?.client_state ?? (msg as any).client_state ?? '';
+    if (rawClientState) {
+      try {
+        clientState = JSON.parse(Buffer.from(rawClientState, 'base64').toString());
+        this.logger.info({ clientState }, 'Decoded client_state from stream start');
+      } catch { /* not base64 JSON — ignore */ }
+    }
+
+    // Merge sources: preConfig (from URL) > client_state > custom_parameters > defaults
     this.sessionConfig = {
-      model: (params.model as CalcModel) ?? ('JACK' as CalcModel),
-      direction: (params.direction as 'inbound' | 'outbound') ?? 'inbound',
-      callerPhone: params.callerPhone ?? '',
-      calledPhone: params.calledPhone ?? '',
-      pipelineMode: (params.pipelineMode as VoicePipelineMode) ?? this.pipelineMode,
-      instructions: params.instructions ?? '',
-      recipientName: params.recipientName,
+      model: (this.preConfig.model ?? clientState.model ?? params.model ?? 'JACK') as CalcModel,
+      direction: (this.preConfig.direction ?? clientState.direction ?? params.direction ?? 'inbound') as 'inbound' | 'outbound',
+      callerPhone: this.preConfig.callerPhone ?? clientState.callerPhone ?? params.callerPhone ?? '',
+      calledPhone: this.preConfig.calledPhone ?? clientState.calledPhone ?? params.calledPhone ?? '',
+      pipelineMode: (this.preConfig.pipelineMode ?? params.pipelineMode ?? this.pipelineMode) as VoicePipelineMode,
+      instructions: this.preConfig.instructions ?? clientState.message ?? params.instructions ?? '',
+      recipientName: this.preConfig.recipientName ?? clientState.recipientName ?? params.recipientName,
     };
 
     this.pipelineMode = this.sessionConfig.pipelineMode;

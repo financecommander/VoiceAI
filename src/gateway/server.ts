@@ -503,7 +503,8 @@ if (process.env.DATABASE_URL) {
 }
 
 wss.on('connection', (ws: WebSocket, req) => {
-  const pathname = new URL(req.url ?? '/', `http://${req.headers.host}`).pathname;
+  const parsedUrl = new URL(req.url ?? '/', `http://${req.headers.host}`);
+  const pathname = parsedUrl.pathname;
 
   // ── Telnyx (PRIMARY) ──────────────────────────────────────────────────────
   const telnyxMatch = pathname.match(/\/ws\/telnyx\/(.+)/);
@@ -552,6 +553,18 @@ wss.on('connection', (ws: WebSocket, req) => {
       logger,
       pipelineMode: defaultPipeline,
     });
+
+    // Pass agent context from URL query params (set by outbound-intelligence.ts)
+    // or from the callControlId path segment which may encode the trigger context
+    const qp = parsedUrl.searchParams;
+    if (qp.has('model') || qp.has('agent') || qp.has('direction')) {
+      telnyxHandler.setPreConfig({
+        model: (qp.get('model') ?? qp.get('agent') ?? undefined) as any,
+        direction: (qp.get('direction') ?? undefined) as any,
+        recipientName: qp.get('recipientName') ?? undefined,
+        instructions: qp.get('message') ?? qp.get('instructions') ?? undefined,
+      });
+    }
 
     activeTelnyxCalls.set(callControlId, telnyxHandler);
     ws.on('close', () => {

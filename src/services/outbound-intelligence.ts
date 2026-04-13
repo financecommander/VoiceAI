@@ -246,7 +246,15 @@ export class OutboundIntelligenceService {
     // The call_control_id will be assigned by Telnyx, so we use the trigger ID as the
     // stream path identifier. The ws/telnyx handler on server.ts picks it up.
     const streamBase = this.config.telnyxStreamUrlBase || `wss://${process.env.WS_HOST || 'voice.calculusresearch.io'}`;
-    const streamUrl = `${streamBase}/ws/telnyx/${trigger.id}`;
+    // Encode agent context in stream URL query params so the WebSocket handler
+    // can extract model/direction/recipientName without needing client_state
+    const streamParams = new URLSearchParams({
+      model: String(trigger.agent),
+      direction: 'outbound',
+      ...(trigger.recipientName ? { recipientName: trigger.recipientName } : {}),
+      ...(trigger.message ? { message: trigger.message } : {}),
+    });
+    const streamUrl = `${streamBase}/ws/telnyx/${trigger.id}?${streamParams.toString()}`;
 
     this.logger.info(
       {
