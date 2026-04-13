@@ -67,6 +67,7 @@ export const DEFAULT_CRM_ROUTING: UnifiedCRMConfig = {
     JACK: 'hubspot',       // Enterprise/work contacts
     BUNNY: 'hubspot',      // Executive/supervisory (Sean's direct channel)
     JENNY: 'hubspot',      // Personal/family contacts
+    CINDY: 'ghl',          // Loan intake uses GoHighLevel
   },
   ghlLocations: {},
 };

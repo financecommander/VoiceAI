@@ -709,6 +709,7 @@ STYLE: Compact statements. No filler. No extra words. Lead with status when Sean
       JACK: 'Sal',          // Warm, approachable for Calculus AI assistant
       BUNNY: 'Eve',         // Confident, warm female for supervisor
       JENNY: 'Cove',        // Soft, caring female for personal assistant
+      CINDY: 'Eve',         // Warm, professional female for loan intake
     };
     return voiceMap[model];
   }
@@ -870,6 +871,15 @@ STYLE: Compact statements. No filler. No extra words. Lead with status when Sean
         'finance_getBudget', 'finance_getSpending', 'finance_getBills',
         'wellness_getSteps', 'wellness_getSleep', 'wellness_setGoal',
       ],
+      CINDY: [
+        // Cindy — Loan intake, scheduling, client follow-ups
+        'crm_createTicket', 'crm_searchFAQ',
+        'ghl_getContact', 'ghl_createContact', 'ghl_updateContact',
+        'ghl_bookAppointment', 'ghl_getAvailableSlots',
+        'ghl_sendSMS', 'ghl_sendEmail', 'ghl_logCall', 'ghl_createNote',
+        'personal_createTask', 'personal_setReminder',
+        'calendar_getEvents', 'calendar_createEvent', 'calendar_checkConflicts',
+      ],
     };
     return toolMap[model] ?? [];
   }
@@ -965,6 +975,11 @@ STYLE: Compact statements. No filler. No extra words. Lead with status when Sean
         { name: 'wellness_getSleep', description: 'Get last night sleep data', parameters: {} },
         { name: 'home_getSecurityStatus', description: 'Get home security system status', parameters: {} },
         { name: 'home_getClimate', description: 'Get home thermostat status', parameters: {} },
+      ],
+      CINDY: [
+        { name: 'ghl_getContact', description: 'Look up client in CRM', parameters: { contactId: 'string' } },
+        { name: 'calendar_getEvents', description: 'Get upcoming appointments', parameters: { date: 'string' } },
+        { name: 'ghl_getAvailableSlots', description: 'Check available appointment slots', parameters: { date: 'string' } },
       ],
     };
     return readOnlyMap[model] ?? [];

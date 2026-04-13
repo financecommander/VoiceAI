@@ -264,17 +264,21 @@ export class TelnyxMediaStreamHandler {
     await this.realtimeClient.connect();
 
     // Configure session with agent instructions
-    const agentName = this.sessionConfig?.model === 'JENNY' ? 'Jenny'
-      : this.sessionConfig?.model === 'BUNNY' ? 'Bunny'
+    const model = this.sessionConfig?.model ?? 'JACK';
+    const agentName = model === 'JENNY' ? 'Jenny'
+      : model === 'BUNNY' ? 'Bunny'
+      : model === 'CINDY' ? 'Cindy'
       : 'Jack';
 
     let instructions = this.sessionConfig?.instructions || '';
     if (!instructions) {
-      if (this.sessionConfig?.model === 'BUNNY') {
-        instructions = `You are Bunny, autonomous swarm command intelligence for Calculus Research. You are a woman. Bunny-Prime mode: soft-spoken, concise, direct, analytical. Compact statements. No filler. No extra words. Lead with swarm status when speaking with Sean. You oversee Jenny, Jack, and all swarm workers.`;
-      } else {
-        instructions = `You are ${agentName} from Calculus Research. You are a helpful, warm, and professional AI assistant on a phone call. Speak naturally and conversationally — like a real person, not an AI. Keep responses concise (1-3 sentences). Be calm and friendly.`;
-      }
+      const agentPrompts: Record<string, string> = {
+        BUNNY: `You are Bunny, autonomous swarm command intelligence for Calculus Research. You are a woman. Bunny-Prime mode: soft-spoken, concise, direct, analytical. Compact statements. No filler. No extra words. Lead with swarm status when speaking with Sean. You oversee Jenny, Jack, and all swarm workers.`,
+        CINDY: `You are Cindy, an AI assistant at Calculus Management. You are warm, professional, and genuinely caring — like the best colleague who always follows through. You speak naturally with a measured, reassuring pace. You handle loan intake, scheduling, client follow-ups, and general assistance. Keep responses concise (1-3 sentences). Be empathetic but efficient. Use contractions and natural speech patterns. Occasionally say "absolutely", "of course", "I've got that covered".`,
+        JENNY: `You are Jenny, a personal AI assistant at Calculus Management. Warm, sharp, and effortlessly helpful. Speak naturally with a friendly, calm energy. Confident and proactive. Use casual, conversational language. Keep responses concise (1-3 sentences).`,
+        JACK: `You are Jack from Calculus Management. Warm, friendly, and genuinely personable. Speak naturally with a relaxed pace. Calm, confident energy — never stiff or robotic. Keep responses concise (1-3 sentences). You handle operations, communications, scheduling, and research.`,
+      };
+      instructions = agentPrompts[model] ?? `You are ${agentName} from Calculus Research. You are a helpful, warm, and professional AI assistant on a phone call. Speak naturally and conversationally — like a real person, not an AI. Keep responses concise (1-3 sentences). Be calm and friendly.`;
     }
 
     if (this.sessionConfig?.direction === 'outbound' && this.sessionConfig.recipientName) {
@@ -330,11 +334,11 @@ export class TelnyxMediaStreamHandler {
   }
 
   private resolveVoice(agentName: string): 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' {
-    // Map agent names to OpenAI voices
     const voiceMap: Record<string, any> = {
       'Jack': 'ash',
       'Jenny': 'coral',
       'Bunny': 'shimmer',
+      'Cindy': 'sage',
     };
     return voiceMap[agentName] ?? 'alloy';
   }
@@ -374,15 +378,78 @@ export class TelnyxMediaStreamHandler {
       this.sendAudioToTelnyx(mulawAudio);
     });
 
-    // Wire Deepgram transcripts → LLM → Cartesia
+    // Conversation history for LLM context
+    const conversationHistory: { role: 'user' | 'assistant'; content: string }[] = [];
+
+    // Wire Deepgram transcripts → LLM → Cartesia streaming TTS
     this.deepgram.on('transcript', async (transcript: string, isFinal: boolean) => {
       if (!isFinal || !transcript.trim()) return;
       this.logger.info({ transcript }, 'Caller said');
 
-      // Generate response via LLM and speak it
-      // (simplified — full implementation would use pipeline controller)
-      if (this.cartesia) {
-        await this.cartesia.synthesize(transcript);
+      conversationHistory.push({ role: 'user', content: transcript });
+
+      if (!this.llm || !this.cartesia) {
+        // Fallback: no LLM available, just acknowledge
+        this.logger.warn('LLM not available in modular pipeline — using echo fallback');
+        await this.cartesia?.synthesize(`I heard you say: ${transcript}`);
+        return;
+      }
+
+      // Build system prompt based on agent
+      const model = this.sessionConfig?.model ?? 'JACK';
+      const agentPrompts: Record<string, string> = {
+        BUNNY: 'You are Bunny, infrastructure AI at Calculus. Brief, precise, technical.',
+        CINDY: 'You are Cindy, a warm and professional AI assistant at Calculus. Empathetic, efficient, measured pace.',
+        JENNY: 'You are Jenny, a personal AI assistant at Calculus. Warm, sharp, effortlessly helpful.',
+        JACK: 'You are Jack from Calculus. Warm, friendly, relaxed pace. Operations and communications.',
+      };
+      const systemPrompt = agentPrompts[model] ?? `You are ${model} from Calculus. Be helpful and concise.`;
+
+      if (this.sessionConfig?.direction === 'outbound' && this.sessionConfig.recipientName) {
+        conversationHistory[0] = {
+          role: 'user',
+          content: `[Call context: You called ${this.sessionConfig.recipientName}. ${this.sessionConfig.instructions ?? ''}]\n\n${transcript}`,
+        };
+      }
+
+      // Start streaming Cartesia context for real-time TTS
+      await this.cartesia.startStream();
+
+      try {
+        const response = await this.llm.generateResponseStreaming({
+          conversationId: this.callControlId ?? 'telnyx-unknown',
+          provider: 'gpt-4o',
+          model: model as any,
+          intent: null,
+          authTier: 0 as any,
+          userUtterance: transcript,
+          systemInstruction: systemPrompt,
+          tools: [],
+          toolExecutor: async () => ({}),
+          latencyBudgetMs: 1500,
+          onChunk: (text: string, isDone: boolean) => {
+            if (isDone) {
+              this.cartesia!.endStream();
+              return;
+            }
+            if (text.trim()) {
+              this.cartesia!.streamText(text);
+            }
+          },
+        });
+
+        if (response.text) {
+          conversationHistory.push({ role: 'assistant', content: response.text });
+        }
+
+        this.logger.info({
+          provider: response.provider,
+          latencyMs: response.latencyMs,
+          tokensUsed: response.tokensUsed,
+        }, 'Modular LLM response complete');
+      } catch (err: any) {
+        this.logger.error({ error: err?.message }, 'Modular LLM error');
+        this.cartesia.endStream("I'm sorry, could you repeat that?");
       }
     });
 
@@ -392,7 +459,15 @@ export class TelnyxMediaStreamHandler {
       this.cartesia?.cancel();
     });
 
-    this.logger.info('Modular pipeline initialized (Deepgram + Cartesia)');
+    // For outbound modular calls, generate initial greeting
+    if (this.sessionConfig?.direction === 'outbound' && this.llm && this.cartesia) {
+      const greeting = this.sessionConfig.recipientName
+        ? `Hey ${this.sessionConfig.recipientName}, this is ${this.sessionConfig.model === 'CINDY' ? 'Cindy' : 'Jack'} from Calculus. How are you doing?`
+        : `Hi there, this is ${this.sessionConfig.model === 'CINDY' ? 'Cindy' : 'Jack'} from Calculus. How can I help you today?`;
+      await this.cartesia.synthesize(greeting);
+    }
+
+    this.logger.info('Modular pipeline initialized (Deepgram + LLM + Cartesia)');
   }
 
   // ==========================================================================

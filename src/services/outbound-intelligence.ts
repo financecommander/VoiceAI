@@ -53,6 +53,13 @@ export interface OutboundConfig {
   callWindowStart: number;
   callWindowEnd: number;
   timezone: string;
+
+  // Telnyx (primary telephony provider)
+  telnyxApiKey?: string;
+  telnyxConnectionId?: string;
+  telnyxFromNumbers?: Record<string, string>;
+  /** WebSocket URL base for Telnyx bidirectional media streaming */
+  telnyxStreamUrlBase?: string;
 }
 
 export interface QueueStatus {
@@ -205,24 +212,113 @@ export class OutboundIntelligenceService {
   }
 
   /**
-   * Place a single outbound call via the Twilio REST API. The call connects
-   * to the VoiceAI webhook with custom parameters encoding trigger context so
-   * the receiving agent has full situational awareness.
+   * Place a single outbound call. Tries Telnyx first (primary), falls back
+   * to Twilio if Telnyx is not configured or fails.
+   *
+   * Telnyx: passes stream_url directly in the call API so the WebSocket
+   * bidirectional media stream opens automatically when the callee answers.
+   * This is the correct approach — TeXML <Stream> is NOT supported for
+   * Call Control apps.
    */
   async placeCall(trigger: OutboundTrigger): Promise<boolean> {
-    const fromNumber = this.resolveFromNumber(trigger.agent);
+    // Try Telnyx first
+    if (this.config.telnyxApiKey && this.config.telnyxConnectionId) {
+      const success = await this.placeCallViaTelnyx(trigger);
+      if (success) return true;
+      this.logger.warn({ triggerId: trigger.id }, 'Telnyx call failed — falling back to Twilio');
+    }
+
+    // Fallback to Twilio
+    return this.placeCallViaTwilio(trigger);
+  }
+
+  private async placeCallViaTelnyx(trigger: OutboundTrigger): Promise<boolean> {
+    const fromNumber = this.config.telnyxFromNumbers?.[trigger.agent]
+      ?? this.config.telnyxFromNumbers?.['default']
+      ?? '';
+
     if (!fromNumber) {
-      this.logger.error(
-        { agent: trigger.agent },
-        'No Twilio from-number configured for agent — cannot place call',
-      );
+      this.logger.error({ agent: trigger.agent }, 'No Telnyx from-number for agent');
       return false;
     }
 
-    // Build the TwiML webhook URL with query parameters so the receiving
-    // handler can hydrate the agent with context.
-    const webhookUrl = this.buildWebhookUrl(trigger);
+    // Build the stream URL — Telnyx opens a WebSocket to this URL when the call connects.
+    // The call_control_id will be assigned by Telnyx, so we use the trigger ID as the
+    // stream path identifier. The ws/telnyx handler on server.ts picks it up.
+    const streamBase = this.config.telnyxStreamUrlBase || `wss://${process.env.WS_HOST || 'voice.calculusresearch.io'}`;
+    const streamUrl = `${streamBase}/ws/telnyx/${trigger.id}`;
 
+    this.logger.info(
+      {
+        triggerId: trigger.id,
+        to: this.redactPhone(trigger.recipientPhone),
+        from: this.redactPhone(fromNumber),
+        agent: trigger.agent,
+        type: trigger.type,
+        attempt: trigger.attemptCount,
+        streamUrl,
+      },
+      'Placing outbound call via Telnyx',
+    );
+
+    try {
+      const resp = await fetch('https://api.telnyx.com/v2/calls', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.config.telnyxApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: trigger.recipientPhone,
+          from: fromNumber,
+          connection_id: this.config.telnyxConnectionId,
+          stream_url: streamUrl,
+          stream_track: 'both_tracks',
+          stream_bidirectional_mode: 'rtp',
+          stream_bidirectional_codec: 'PCMU',
+          timeout_secs: 30,
+          // Pass agent context as client_state (base64 JSON) so the WebSocket
+          // handler can extract it from the stream start event
+          client_state: Buffer.from(JSON.stringify({
+            model: trigger.agent,
+            direction: 'outbound',
+            recipientName: trigger.recipientName ?? '',
+            message: trigger.message ?? '',
+            triggerId: trigger.id,
+            triggerType: trigger.type,
+          })).toString('base64'),
+        }),
+      });
+
+      const result = await resp.json() as any;
+
+      if (!resp.ok) {
+        const errDetail = result.errors?.[0]?.detail ?? JSON.stringify(result);
+        this.logger.error({ triggerId: trigger.id, status: resp.status, error: errDetail }, 'Telnyx API call failed');
+        return false;
+      }
+
+      trigger.callSid = result.data?.call_control_id ?? '';
+      this.logger.info(
+        { triggerId: trigger.id, callControlId: trigger.callSid },
+        'Telnyx call initiated successfully',
+      );
+      return true;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error({ triggerId: trigger.id, error: message }, 'Telnyx API call failed');
+      return false;
+    }
+  }
+
+  private async placeCallViaTwilio(trigger: OutboundTrigger): Promise<boolean> {
+    const fromNumber = this.resolveFromNumber(trigger.agent);
+    if (!fromNumber) {
+      this.logger.error({ agent: trigger.agent }, 'No Twilio from-number for agent');
+      return false;
+    }
+
+    const webhookUrl = this.buildWebhookUrl(trigger);
     const statusCallbackUrl = new URL('/webhook/twilio/status', this.config.webhookBaseUrl).toString();
 
     this.logger.info(
@@ -255,14 +351,10 @@ export class OutboundIntelligenceService {
         { triggerId: trigger.id, callSid: call.sid },
         'Twilio call initiated successfully',
       );
-
       return true;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(
-        { triggerId: trigger.id, error: message },
-        'Twilio API call failed',
-      );
+      this.logger.error({ triggerId: trigger.id, error: message }, 'Twilio API call failed');
       return false;
     }
   }

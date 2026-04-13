@@ -135,84 +135,146 @@ app.get('/health', (_req, res) => {
 });
 
 // ============================================================================
-// Telnyx Inbound Call Webhook (PRIMARY — TeXML)
+// Telnyx Call Control v1 Webhook (PRIMARY)
+//
+// Telnyx sends JSON events (call.initiated, call.answered, call.hangup, etc.)
+// We respond with REST API calls — NOT TeXML. Bidirectional streaming is set up
+// via stream_url in the answer command (for inbound) or in the call placement
+// API (for outbound, handled by outbound-intelligence.ts).
 // ============================================================================
 
-app.post('/webhook/telnyx/inbound', (req, res) => {
-  const { From, To, CallControlId } = req.body;
-  logger.info({ from: From, to: To, callControlId: CallControlId }, 'Telnyx inbound call');
+app.post('/webhook/telnyx/inbound', async (req, res) => {
+  // Telnyx Call Control v1 sends: { data: { event_type, payload: {...} } }
+  // Telnyx TeXML v2 sends: { From, To, CallControlId, ... }
+  // We handle both formats for robustness.
+  const data = req.body.data ?? req.body;
+  const eventType = data.event_type ?? '';
+  const payload = data.payload ?? req.body;
 
-  const model = resolveModelFromNumber(To) !== 'DMC'
-    ? resolveModelFromNumber(To)
-    : resolveModelFromNumber(From);
-  const wsHost = process.env.WS_HOST || req.headers.host || 'localhost:3000';
-  const wsProtocol = process.env.WS_PROTOCOL || 'wss';
-  const pipeline = (req.query.pipeline as string) || defaultPipeline;
+  const callControlId = payload.call_control_id ?? payload.CallControlId ?? '';
+  const from = payload.from ?? payload.From ?? '';
+  const to = payload.to ?? payload.To ?? '';
+  const direction = payload.direction ?? 'inbound';
 
-  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+  logger.info({ eventType: eventType || 'texml', callControlId: callControlId?.substring?.(0, 20), from, to, direction }, 'Telnyx webhook received');
+
+  // For Call Control v1: handle call.initiated by answering + starting stream
+  if (eventType === 'call.initiated' && direction === 'inbound') {
+    const model = resolveModelFromNumber(to) !== 'DMC' ? resolveModelFromNumber(to) : resolveModelFromNumber(from);
+    const wsHost = process.env.WS_HOST || 'voice.calculusresearch.io';
+    const streamUrl = `wss://${wsHost}/ws/telnyx/${callControlId}`;
+    const telnyxApiKey = process.env.TELNYX_API_KEY ?? '';
+
+    logger.info({ callControlId: callControlId?.substring?.(0, 20), model, streamUrl }, 'Answering inbound call + starting stream');
+
+    // Answer the call
+    try {
+      await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${telnyxApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_state: Buffer.from(JSON.stringify({
+            model, direction: 'inbound', callerPhone: from, calledPhone: to,
+          })).toString('base64'),
+          stream_url: streamUrl,
+          stream_track: 'both_tracks',
+          stream_bidirectional_mode: 'rtp',
+          stream_bidirectional_codec: 'PCMU',
+        }),
+      });
+    } catch (err: any) {
+      logger.error({ error: err?.message, callControlId: callControlId?.substring?.(0, 20) }, 'Failed to answer inbound call');
+    }
+
+    res.sendStatus(200);
+    return;
+  }
+
+  // For Call Control v1: other events (answered, hangup, streaming.started, etc.)
+  if (eventType) {
+    logger.info({ eventType, callControlId: callControlId?.substring?.(0, 20) }, 'Telnyx call event');
+    res.sendStatus(200);
+    return;
+  }
+
+  // TeXML v2 fallback: return XML if body looks like TeXML (has From/To/CallControlId directly)
+  if (payload.CallControlId || payload.From) {
+    const model = resolveModelFromNumber(to) !== 'DMC' ? resolveModelFromNumber(to) : resolveModelFromNumber(from);
+    const wsHost = process.env.WS_HOST || req.headers.host || 'localhost:3000';
+    const wsProtocol = process.env.WS_PROTOCOL || 'wss';
+    const pipeline = (req.query.pipeline as string) || defaultPipeline;
+
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
-    <Stream url="${wsProtocol}://${wsHost}/ws/telnyx/${CallControlId}"
-            track="both_tracks"
-            codec="PCMU"
-            bidirectionalMode="rtp"
-            bidirectionalCodec="PCMU"
-            bidirectionalSamplingRate="8000">
+    <Stream url="${wsProtocol}://${wsHost}/ws/telnyx/${callControlId}"
+            track="both_tracks" codec="PCMU"
+            bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="8000">
       <Parameter name="model" value="${model}" />
       <Parameter name="direction" value="inbound" />
-      <Parameter name="callerPhone" value="${From}" />
-      <Parameter name="calledPhone" value="${To}" />
+      <Parameter name="callerPhone" value="${from}" />
+      <Parameter name="calledPhone" value="${to}" />
       <Parameter name="pipelineMode" value="${pipeline}" />
     </Stream>
   </Start>
   <Pause length="3600" />
 </Response>`);
+    return;
+  }
+
+  res.sendStatus(200);
 });
 
-// ============================================================================
-// Telnyx Outbound Call Webhook (PRIMARY — TeXML)
-// ============================================================================
-
+// Telnyx outbound webhook — for outbound calls placed via the API with stream_url,
+// Telnyx doesn't need a webhook response to start streaming (it's already in the API call).
+// This handler just logs the event and responds 200.
 app.post('/webhook/telnyx/outbound', (req, res) => {
-  const { From, To, CallControlId } = req.body;
+  const data = req.body.data ?? req.body;
+  const eventType = data.event_type ?? '';
+  const payload = data.payload ?? req.body;
+  const callControlId = payload.call_control_id ?? payload.CallControlId ?? '';
   const agent = (req.query.agent as string) || 'JACK';
-  const recipientName = (req.query.recipientName as string) || '';
-  const message = (req.query.message as string) || '';
-  const triggerId = (req.query.triggerId as string) || '';
-  const pipeline = (req.query.pipeline as string) || defaultPipeline;
 
-  logger.info({ from: From, to: To, agent, pipeline }, 'Telnyx outbound call connected');
+  logger.info({ eventType: eventType || 'outbound', callControlId: callControlId?.substring?.(0, 20), agent }, 'Telnyx outbound call connected');
 
-  const wsHost = process.env.WS_HOST || req.headers.host || 'localhost:3000';
-  const wsProtocol = process.env.WS_PROTOCOL || 'wss';
+  // If TeXML v2 format (has From/To), return XML for backward compat
+  if (payload.CallControlId || payload.From) {
+    const from = payload.From ?? payload.from ?? '';
+    const to = payload.To ?? payload.to ?? '';
+    const recipientName = (req.query.recipientName as string) || '';
+    const message = (req.query.message as string) || '';
+    const wsHost = process.env.WS_HOST || req.headers.host || 'localhost:3000';
+    const wsProtocol = process.env.WS_PROTOCOL || 'wss';
 
-  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
-    <Stream url="${wsProtocol}://${wsHost}/ws/telnyx/${CallControlId}"
-            track="both_tracks"
-            codec="PCMU"
-            bidirectionalMode="rtp"
-            bidirectionalCodec="PCMU"
-            bidirectionalSamplingRate="8000">
+    <Stream url="${wsProtocol}://${wsHost}/ws/telnyx/${callControlId}"
+            track="both_tracks" codec="PCMU"
+            bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="8000">
       <Parameter name="model" value="${agent}" />
       <Parameter name="direction" value="outbound" />
-      <Parameter name="callerPhone" value="${From}" />
-      <Parameter name="calledPhone" value="${To}" />
+      <Parameter name="callerPhone" value="${from}" />
+      <Parameter name="calledPhone" value="${to}" />
       <Parameter name="recipientName" value="${recipientName}" />
       <Parameter name="instructions" value="${message}" />
-      <Parameter name="triggerId" value="${triggerId}" />
-      <Parameter name="pipelineMode" value="${pipeline}" />
+      <Parameter name="pipelineMode" value="${defaultPipeline}" />
     </Stream>
   </Start>
   <Pause length="3600" />
 </Response>`);
+    return;
+  }
+
+  res.sendStatus(200);
 });
 
-// Telnyx status callback
+// Telnyx status/event callback (catch-all for events we don't handle above)
 app.post('/webhook/telnyx/status', (req, res) => {
-  const { CallControlId, call_status, duration } = req.body;
-  logger.info({ callControlId: CallControlId, status: call_status, duration }, 'Telnyx call status');
+  const data = req.body.data ?? req.body;
+  const eventType = data.event_type ?? '';
+  const payload = data.payload ?? {};
+  logger.info({ eventType, callControlId: payload.call_control_id?.substring?.(0, 20) }, 'Telnyx call status');
   res.sendStatus(200);
 });
 
@@ -363,27 +425,46 @@ const activeCalls = new Map<string, TwilioMediaStreamHandler>();
 // Shared conversation memory service
 const conversationMemory = new ConversationMemoryService(logger);
 
-// Outbound intelligence service (only if Twilio credentials are available)
+// Outbound intelligence service (Telnyx primary, Twilio fallback)
 let outboundService: OutboundIntelligenceService | null = null;
-if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-  outboundService = new OutboundIntelligenceService({
-    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
-    twilioFromNumbers: {
-      JACK: process.env.PHONE_JACK || '+12243850755',
-      JENNY: process.env.PHONE_JENNY || '+14014256830',
-      BUNNY: process.env.PHONE_BUNNY || '+18338472291',
-      default: process.env.PHONE_JACK || '+12243850755',
-    },
-    webhookBaseUrl: process.env.WEBHOOK_BASE_URL || `https://${process.env.WS_HOST || 'localhost:3000'}`,
-    maxConcurrentCalls: parseInt(process.env.MAX_CONCURRENT_OUTBOUND ?? '3', 10),
-    callWindowStart: parseInt(process.env.CALL_WINDOW_START ?? '9', 10),
-    callWindowEnd: parseInt(process.env.CALL_WINDOW_END ?? '20', 10),
-    timezone: process.env.CALL_TIMEZONE ?? 'America/New_York',
-  }, logger);
-  logger.info('Outbound intelligence service initialized');
-} else {
-  logger.warn('TWILIO_ACCOUNT_SID/AUTH_TOKEN not set — outbound intelligence disabled');
+{
+  const hasTelnyx = !!process.env.TELNYX_API_KEY;
+  const hasTwilio = !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
+
+  if (hasTelnyx || hasTwilio) {
+    outboundService = new OutboundIntelligenceService({
+      // Twilio (fallback)
+      twilioAccountSid: process.env.TWILIO_ACCOUNT_SID ?? '',
+      twilioAuthToken: process.env.TWILIO_AUTH_TOKEN ?? '',
+      twilioFromNumbers: {
+        JACK: process.env.PHONE_JACK || '+12243850755',
+        JENNY: process.env.PHONE_JENNY || '+14014256830',
+        BUNNY: process.env.PHONE_BUNNY || '+18338472291',
+        CINDY: process.env.PHONE_CINDY || '',
+        default: process.env.PHONE_JACK || '+12243850755',
+      },
+      webhookBaseUrl: process.env.WEBHOOK_BASE_URL || `https://${process.env.WS_HOST || 'localhost:3000'}`,
+      maxConcurrentCalls: parseInt(process.env.MAX_CONCURRENT_OUTBOUND ?? '3', 10),
+      callWindowStart: parseInt(process.env.CALL_WINDOW_START ?? '0', 10),
+      callWindowEnd: parseInt(process.env.CALL_WINDOW_END ?? '24', 10),
+      timezone: process.env.CALL_TIMEZONE ?? 'America/New_York',
+
+      // Telnyx (primary) — stream_url passed directly in call API
+      telnyxApiKey: process.env.TELNYX_API_KEY,
+      telnyxConnectionId: process.env.TELNYX_CONNECTION_ID || '2918176396184389568',
+      telnyxFromNumbers: {
+        JACK: process.env.TELNYX_NUMBER_1 || '',
+        JENNY: process.env.TELNYX_NUMBER_2 || '',
+        BUNNY: process.env.TELNYX_NUMBER_3 || '',
+        CINDY: process.env.TELNYX_NUMBER_4 || process.env.TELNYX_NUMBER_1 || '',
+        default: process.env.TELNYX_NUMBER_1 || '',
+      },
+      telnyxStreamUrlBase: `wss://${process.env.WS_HOST || 'voice.calculusresearch.io'}`,
+    }, logger);
+    logger.info({ telnyx: hasTelnyx, twilio: hasTwilio }, 'Outbound intelligence service initialized');
+  } else {
+    logger.warn('Neither TELNYX_API_KEY nor TWILIO credentials set — outbound intelligence disabled');
+  }
 }
 
 // Shared LLM service (stateless per request, history keyed by conversationId)
@@ -453,6 +534,7 @@ wss.on('connection', (ws: WebSocket, req) => {
         JACK: process.env.CARTESIA_VOICE_JACK || fallback,
         JENNY: process.env.CARTESIA_VOICE_JENNY || fallback,
         BUNNY: process.env.CARTESIA_VOICE_BUNNY || fallback,
+        CINDY: process.env.CARTESIA_VOICE_CINDY || fallback,
         MORTGAGE: process.env.CARTESIA_VOICE_MORTGAGE || fallback,
         REAL_ESTATE: process.env.CARTESIA_VOICE_RE || fallback,
         LOAN_SERVICING: process.env.CARTESIA_VOICE_LS || fallback,
@@ -541,6 +623,7 @@ wss.on('connection', (ws: WebSocket, req) => {
         JACK: process.env.CARTESIA_VOICE_JACK || fallback,
         JENNY: process.env.CARTESIA_VOICE_JENNY || fallback,
         BUNNY: process.env.CARTESIA_VOICE_BUNNY || fallback,
+        CINDY: process.env.CARTESIA_VOICE_CINDY || fallback,
         MORTGAGE: process.env.CARTESIA_VOICE_MORTGAGE || fallback,
         REAL_ESTATE: process.env.CARTESIA_VOICE_RE || fallback,
         LOAN_SERVICING: process.env.CARTESIA_VOICE_LS || fallback,

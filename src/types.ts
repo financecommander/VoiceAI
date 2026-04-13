@@ -36,6 +36,7 @@ export enum CalcModel {
   JACK = 'JACK',
   BUNNY = 'BUNNY',
   JENNY = 'JENNY',
+  CINDY = 'CINDY',
 }
 
 // ============================================================================
